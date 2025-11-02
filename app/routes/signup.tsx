@@ -1,10 +1,11 @@
 import { SignupForm } from "~/components/signup-form"
 import { redirect, useActionData } from "react-router"
-import type { ActionFunctionArgs } from "react-router"
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router"
 import { z } from "zod"
 import bcrypt from "bcryptjs"
 import prisma from "../../prisma/prisma"
 import type { ActionData } from "~/types/actionData"
+import { getOptionalUser } from "~/lib/auth.server"
 
 const signupSchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
@@ -16,6 +17,14 @@ const signupSchema = z.object({
   message: "As senhas não coincidem",
   path: ["confirmPassword"],
 })
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getOptionalUser(request)
+  if (user) {
+    throw redirect("/")
+  }
+  return null
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData()

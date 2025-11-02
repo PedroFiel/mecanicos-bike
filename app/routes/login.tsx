@@ -1,14 +1,23 @@
 import bcrypt from "bcryptjs"
 import prisma from "prisma/prisma"
-import { redirect, useActionData, type ActionFunctionArgs } from "react-router"
+import { redirect, useActionData, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router"
 import { z } from "zod"
 import { LoginForm } from "~/components/login-form"
 import type { ActionData } from "~/types/actionData"
+import { createUserSession, getOptionalUser } from "~/lib/auth.server"
 
 const loginSchema = z.object({
   email: z.string().email("Endereço de email inválido"),
   password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres"),
 })
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getOptionalUser(request)
+  if (user) {
+    throw redirect("/")
+  }
+  return null
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData()
@@ -53,7 +62,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
-  return redirect("/")
+  // Cria JWT token e seta cookie, depois redireciona
+  return createUserSession(user.id, user.email, "/")
 }
 
 export default function Page() {
