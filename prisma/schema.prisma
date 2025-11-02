@@ -1,0 +1,100 @@
+generator client {
+  provider      = "prisma-client"
+  output        = "../app/generated/prisma"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+
+
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String
+  phone     String?
+  createdAt DateTime  @default(now())
+
+  // Relações
+  clients   Client[]
+  bikes     Bike[]
+  appointments Appointment[]
+  @@map("users")
+}
+
+model Client {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  fullName    String
+  cpf         String?   @unique
+  email       String?
+  birthDate   DateTime?
+  phone       String?
+  address     String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  // Relações
+  user        User      @relation(fields: [userId], references: [id])
+  bikes       Bike[]
+  appointments Appointment[]
+  @@map("clients")
+}
+
+model Bike {
+  id             Int       @id @default(autoincrement())
+  clientId       Int
+  userId         Int
+  model          String
+  brand          String?
+  color          String?
+  frameNumber    String?
+  characteristics String?
+  createdAt      DateTime  @default(now())
+
+  // Relações
+  client         Client    @relation(fields: [clientId], references: [id])
+  user           User      @relation(fields: [userId], references: [id])
+  appointments   Appointment[]
+  @@map("bikes")
+}
+
+model Appointment {
+  id           Int       @id @default(autoincrement())
+  clientId     Int
+  bikeId       Int
+  userId       Int
+  title        String
+  description  String?
+  serviceDate  DateTime  @default(now())
+  status       AppointmentStatus @default(CONCLUIDO)
+  totalCost    Float?
+
+  // Relações
+  client       Client    @relation(fields: [clientId], references: [id])
+  bike         Bike      @relation(fields: [bikeId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+  serviceDetails ServiceDetail[]
+  @@map("appointments")
+}
+
+model ServiceDetail {
+  id             Int       @id @default(autoincrement())
+  appointmentId  Int
+  partReplaced   String?
+  workDone       String?
+  cost           Float? 
+
+  appointment    Appointment @relation(fields: [appointmentId], references: [id])
+  @@map("service_details")
+}
+
+enum AppointmentStatus {
+  PENDENTE
+  CONCLUIDO
+  CANCELADO
+}
