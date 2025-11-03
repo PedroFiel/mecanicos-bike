@@ -22,6 +22,12 @@ import {
 import { Badge } from "~/components/ui/badge"
 import { IconEdit, IconPlus, IconCalendar, IconUser } from "@tabler/icons-react"
 import { getBikeDisplayName } from "~/features/bikes/types"
+import {
+  formatStatus,
+  formatDate,
+  formatCurrency,
+  getStatusColor,
+} from "~/features/appointments/types"
 
 export const handle: RouteHandle = {
   title: "Detalhes da Bike",
@@ -145,9 +151,11 @@ export default function Page() {
                   : `${bike.appointments.length} atendimento(s) registrado(s)`}
               </CardDescription>
             </div>
-            <Button size="sm" disabled>
-              <IconPlus className="mr-2 h-4 w-4" />
-              Novo Atendimento
+            <Button size="sm" asChild>
+              <NavLink to={`/appointments/new?clientId=${bike.clientId}`}>
+                <IconPlus className="mr-2 h-4 w-4" />
+                Novo Atendimento
+              </NavLink>
             </Button>
           </div>
         </CardHeader>
@@ -158,9 +166,11 @@ export default function Page() {
               <p className="text-muted-foreground mb-4">
                 Nenhum atendimento registrado para esta bike
               </p>
-              <Button disabled>
-                <IconPlus className="mr-2 h-4 w-4" />
-                Registrar Primeiro Atendimento
+              <Button asChild>
+                <NavLink to={`/appointments/new?clientId=${bike.clientId}`}>
+                  <IconPlus className="mr-2 h-4 w-4" />
+                  Registrar Primeiro Atendimento
+                </NavLink>
               </Button>
             </div>
           ) : (
@@ -179,37 +189,26 @@ export default function Page() {
                   {bike.appointments.map((appointment) => (
                     <TableRow key={appointment.id}>
                       <TableCell className="whitespace-nowrap">
-                        {new Date(appointment.serviceDate).toLocaleDateString(
-                          "pt-BR"
-                        )}
+                        {formatDate(appointment.serviceDate)}
                       </TableCell>
                       <TableCell className="font-medium">
                         {appointment.title}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={
-                            appointment.status === "CONCLUIDO"
-                              ? "default"
-                              : appointment.status === "PENDENTE"
-                              ? "secondary"
-                              : "destructive"
-                          }
-                        >
-                          {appointment.status}
+                        <Badge variant={getStatusColor(appointment.status)}>
+                          {formatStatus(appointment.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         {appointment.totalCost
-                          ? new Intl.NumberFormat("pt-BR", {
-                              style: "currency",
-                              currency: "BRL",
-                            }).format(appointment.totalCost)
+                          ? formatCurrency(appointment.totalCost)
                           : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" disabled>
-                          Ver Detalhes
+                        <Button variant="ghost" size="sm" asChild>
+                          <NavLink to={`/appointments/${appointment.id}`}>
+                            Ver Detalhes
+                          </NavLink>
                         </Button>
                       </TableCell>
                     </TableRow>

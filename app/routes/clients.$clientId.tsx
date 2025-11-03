@@ -29,6 +29,12 @@ import {
   IconUser
 } from "@tabler/icons-react"
 import { formatCPF, formatPhone } from "~/features/clients/types"
+import {
+  formatStatus,
+  formatDate,
+  formatCurrency,
+  getStatusColor,
+} from "~/features/appointments/types"
 
 export const handle: RouteHandle = {
   title: "Detalhes do Cliente",
@@ -298,9 +304,18 @@ export default function Page() {
                       : `${client.appointments.length} atendimento(s) registrado(s)`}
                   </CardDescription>
                 </div>
-                <Button size="sm" disabled={client.bikes.length === 0}>
-                  <IconPlus className="mr-2 h-4 w-4" />
-                  Novo Atendimento
+                <Button size="sm" disabled={client.bikes.length === 0} asChild={client.bikes.length > 0}>
+                  {client.bikes.length > 0 ? (
+                    <NavLink to={`/appointments/new?clientId=${client.id}`}>
+                      <IconPlus className="mr-2 h-4 w-4" />
+                      Novo Atendimento
+                    </NavLink>
+                  ) : (
+                    <>
+                      <IconPlus className="mr-2 h-4 w-4" />
+                      Novo Atendimento
+                    </>
+                  )}
                 </Button>
               </div>
             </CardHeader>
@@ -316,9 +331,18 @@ export default function Page() {
                       Cadastre uma bike primeiro para criar atendimentos
                     </p>
                   )}
-                  <Button disabled={client.bikes.length === 0}>
-                    <IconPlus className="mr-2 h-4 w-4" />
-                    Registrar Primeiro Atendimento
+                  <Button disabled={client.bikes.length === 0} asChild={client.bikes.length > 0}>
+                    {client.bikes.length > 0 ? (
+                      <NavLink to={`/appointments/new?clientId=${client.id}`}>
+                        <IconPlus className="mr-2 h-4 w-4" />
+                        Registrar Primeiro Atendimento
+                      </NavLink>
+                    ) : (
+                      <>
+                        <IconPlus className="mr-2 h-4 w-4" />
+                        Registrar Primeiro Atendimento
+                      </>
+                    )}
                   </Button>
                 </div>
               ) : (
@@ -338,38 +362,27 @@ export default function Page() {
                       {client.appointments.map((appointment) => (
                         <TableRow key={appointment.id}>
                           <TableCell className="whitespace-nowrap">
-                            {new Date(
-                              appointment.serviceDate
-                            ).toLocaleDateString("pt-BR")}
+                            {formatDate(appointment.serviceDate)}
                           </TableCell>
                           <TableCell className="font-medium">
                             {appointment.title}
                           </TableCell>
                           <TableCell>{appointment.bike.model}</TableCell>
                           <TableCell>
-                            <Badge
-                              variant={
-                                appointment.status === "CONCLUIDO"
-                                  ? "default"
-                                  : appointment.status === "PENDENTE"
-                                  ? "secondary"
-                                  : "destructive"
-                              }
-                            >
-                              {appointment.status}
+                            <Badge variant={getStatusColor(appointment.status)}>
+                              {formatStatus(appointment.status)}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             {appointment.totalCost
-                              ? new Intl.NumberFormat("pt-BR", {
-                                  style: "currency",
-                                  currency: "BRL",
-                                }).format(appointment.totalCost)
+                              ? formatCurrency(appointment.totalCost)
                               : "—"}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" disabled>
-                              Ver Detalhes
+                            <Button variant="ghost" size="sm" asChild>
+                              <NavLink to={`/appointments/${appointment.id}`}>
+                                Ver Detalhes
+                              </NavLink>
                             </Button>
                           </TableCell>
                         </TableRow>

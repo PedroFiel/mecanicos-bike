@@ -1,6 +1,5 @@
 import { z } from "zod"
 
-// Schema de validação para login
 export const loginSchema = z.object({
   email: z
     .string()
@@ -11,7 +10,6 @@ export const loginSchema = z.object({
     .min(8, "A senha deve ter pelo menos 8 caracteres"),
 })
 
-// Schema de validação para signup
 export const signupSchema = z
   .object({
     name: z
@@ -41,11 +39,9 @@ export const signupSchema = z
     path: ["confirmPassword"],
   })
 
-// Types inferidos dos schemas
 export type LoginFormData = z.infer<typeof loginSchema>
 export type SignupFormData = z.infer<typeof signupSchema>
 
-// Helper para converter ZodError em objeto de erros
 export function parseZodErrors(error: z.ZodError): Record<string, string> {
   const errors: Record<string, string> = {}
   error.issues.forEach((issue) => {
@@ -56,7 +52,6 @@ export function parseZodErrors(error: z.ZodError): Record<string, string> {
   return errors
 }
 
-// Helper para formatar telefone (reutilizável)
 export function formatPhone(phone: string): string {
   const cleaned = phone.replace(/\D/g, "")
   if (cleaned.length === 11) {
