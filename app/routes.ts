@@ -9,6 +9,7 @@ export default [
         route("clients", "routes/clients.tsx"),
         route("clients/new", "routes/clients.new.tsx"),
         route("clients/:clientId", "routes/clients.$clientId.tsx"),
+        route("clients/:clientId/edit", "routes/clients.$clientId.edit.tsx"),
     ]),
     route("login", "routes/login.tsx"),
     route("register", "routes/signup.tsx"),

@@ -21,6 +21,7 @@ interface ClientFormProps extends React.ComponentProps<"div"> {
   errors?: Record<string, string>
   defaultValues?: Partial<ClientFormData>
   isEdit?: boolean
+  clientId?: number
 }
 
 export function ClientForm({
@@ -28,8 +29,13 @@ export function ClientForm({
   errors,
   defaultValues,
   isEdit = false,
+  clientId,
   ...props
 }: ClientFormProps) {
+  const cancelRoute = isEdit && clientId 
+    ? `/clients/${clientId}` 
+    : "/clients"
+  
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
@@ -173,7 +179,7 @@ export function ClientForm({
                   className="flex-1 w-full sm:w-auto"
                   asChild
                 >
-                  <NavLink to="/clients">Cancelar</NavLink>
+                  <NavLink to={cancelRoute}>Cancelar</NavLink>
                 </Button>
               </div>
             </FieldGroup>

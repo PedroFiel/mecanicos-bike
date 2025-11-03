@@ -2,6 +2,11 @@ import type { Route } from "./+types/home";
 import { requireAuth } from "~/lib/auth.server";
 import { useLoaderData } from "react-router";
 import prisma from "prisma/prisma";
+import type { RouteHandle } from "~/types/route";
+
+export const handle: RouteHandle = {
+  title: "Home",
+};
 
 export function meta({}: Route.MetaArgs) {
   return [

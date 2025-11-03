@@ -1,7 +1,9 @@
-import { useLoaderData } from "react-router"
+import { NavLink, useLoaderData, useSearchParams } from "react-router"
 import type { Route } from "./+types/clients.$clientId"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
+import type { RouteHandle } from "~/types/route"
+import { Button } from "~/components/ui/button"
 import {
   Card,
   CardContent,
@@ -9,7 +11,28 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs"
+import { Badge } from "~/components/ui/badge"
+import { 
+  IconEdit, 
+  IconPlus, 
+  IconBike, 
+  IconCalendar,
+  IconUser
+} from "@tabler/icons-react"
 import { formatCPF, formatPhone } from "~/types/client"
+
+export const handle: RouteHandle = {
+  title: "Detalhes do Cliente",
+};
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
@@ -21,7 +44,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       userId,
     },
     include: {
-      bikes: true,
+      bikes: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
       appointments: {
         include: {
           bike: true,
@@ -42,62 +69,313 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export default function ClientDetailPage() {
   const { client } = useLoaderData<typeof loader>()
+  const [searchParams] = useSearchParams()
+  const defaultTab = searchParams.get("tab") || "informacoes"
 
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">{client.fullName}</h1>
-        <p className="text-muted-foreground">Detalhes do cliente</p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {client.fullName}
+          </h1>
+          <p className="text-muted-foreground">Detalhes do cliente</p>
+        </div>
+        <Button asChild className="w-full sm:w-auto">
+          <NavLink to={`/clients/${client.id}/edit`}>
+            <IconEdit className="mr-2 h-4 w-4" />
+            Editar Cliente
+          </NavLink>
+        </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Detalhes do Cliente</CardTitle>
-          <CardDescription>
-            Esta página será implementada com abas: Informações Pessoais, Bikes
-            e Histórico de Atendimentos
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Nome</p>
-                <p className="text-base">{client.fullName}</p>
-              </div>
-              {client.cpf && (
+      <Tabs defaultValue={defaultTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="informacoes" className="gap-2">
+            <IconUser className="h-4 w-4" />
+            <span className="hidden sm:inline">Informações</span>
+            <span className="sm:hidden">Info</span>
+          </TabsTrigger>
+          <TabsTrigger value="bikes" className="gap-2">
+            <IconBike className="h-4 w-4" />
+            Bikes
+            <Badge variant="secondary" className="ml-1">
+              {client.bikes.length}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="atendimentos" className="gap-2">
+            <IconCalendar className="h-4 w-4" />
+            <span className="hidden sm:inline">Atendimentos</span>
+            <span className="sm:hidden">Atend.</span>
+            <Badge variant="secondary" className="ml-1">
+              {client.appointments.length}
+            </Badge>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="informacoes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Informações Pessoais</CardTitle>
+              <CardDescription>
+                Dados cadastrais do cliente
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">CPF</p>
-                  <p className="text-base">
-                    <code className="text-sm">{formatCPF(client.cpf)}</code>
+                  <p className="text-sm font-medium text-muted-foreground">
+                    Nome Completo
                   </p>
+                  <p className="text-base">{client.fullName}</p>
                 </div>
-              )}
-              {client.email && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Email</p>
-                  <p className="text-base">{client.email}</p>
-                </div>
-              )}
-              {client.phone && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Telefone</p>
-                  <p className="text-base">{formatPhone(client.phone)}</p>
-                </div>
-              )}
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total de Bikes</p>
-                <p className="text-base">{client.bikes.length}</p>
+
+                {client.cpf && (
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      CPF
+                    </p>
+                    <p className="text-base">
+                      <code className="text-base">{formatCPF(client.cpf)}</code>
+                    </p>
+                  </div>
+                )}
+
+                {client.email && (
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Email
+                    </p>
+                    <p className="text-base">{client.email}</p>
+                  </div>
+                )}
+
+                {client.phone && (
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Telefone
+                    </p>
+                    <p className="text-base">{formatPhone(client.phone)}</p>
+                  </div>
+                )}
+
+                {client.birthDate && (
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Data de Nascimento
+                    </p>
+                    <p className="text-base">
+                      {new Date(client.birthDate).toLocaleDateString("pt-BR")}
+                    </p>
+                  </div>
+                )}
+
+                {client.address && (
+                  <div className="sm:col-span-2">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Endereço
+                    </p>
+                    <p className="text-base">{client.address}</p>
+                  </div>
+                )}
+
+                {client.notes && (
+                  <div className="sm:col-span-2">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Observações
+                    </p>
+                    <p className="text-base whitespace-pre-wrap">
+                      {client.notes}
+                    </p>
+                  </div>
+                )}
               </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total de Atendimentos</p>
-                <p className="text-base">{client.appointments.length}</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="bikes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Bikes do Cliente</CardTitle>
+                  <CardDescription>
+                    {client.bikes.length === 0
+                      ? "Nenhuma bike cadastrada"
+                      : `${client.bikes.length} bike(s) cadastrada(s)`}
+                  </CardDescription>
+                </div>
+                <Button size="sm" disabled>
+                  <IconPlus className="mr-2 h-4 w-4" />
+                  Nova Bike
+                </Button>
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </CardHeader>
+            <CardContent>
+              {client.bikes.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <IconBike className="h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground mb-4">
+                    Este cliente ainda não possui bikes cadastradas
+                  </p>
+                  <Button disabled>
+                    <IconPlus className="mr-2 h-4 w-4" />
+                    Cadastrar Primeira Bike
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Modelo</TableHead>
+                        <TableHead>Marca</TableHead>
+                        <TableHead>Cor</TableHead>
+                        <TableHead className="text-center">
+                          Atendimentos
+                        </TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {client.bikes.map((bike) => {
+                        const appointmentCount = client.appointments.filter(
+                          (apt) => apt.bikeId === bike.id
+                        ).length
+
+                        return (
+                          <TableRow key={bike.id}>
+                            <TableCell className="font-medium">
+                              {bike.model}
+                            </TableCell>
+                            <TableCell>
+                              {bike.brand || (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {bike.color || (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="secondary">
+                                {appointmentCount}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" disabled>
+                                Ver Detalhes
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="atendimentos" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Histórico de Atendimentos</CardTitle>
+                  <CardDescription>
+                    {client.appointments.length === 0
+                      ? "Nenhum atendimento registrado"
+                      : `${client.appointments.length} atendimento(s) registrado(s)`}
+                  </CardDescription>
+                </div>
+                <Button size="sm" disabled={client.bikes.length === 0}>
+                  <IconPlus className="mr-2 h-4 w-4" />
+                  Novo Atendimento
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {client.appointments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <IconCalendar className="h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground mb-2">
+                    Nenhum atendimento registrado para este cliente
+                  </p>
+                  {client.bikes.length === 0 && (
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Cadastre uma bike primeiro para criar atendimentos
+                    </p>
+                  )}
+                  <Button disabled={client.bikes.length === 0}>
+                    <IconPlus className="mr-2 h-4 w-4" />
+                    Registrar Primeiro Atendimento
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Título</TableHead>
+                        <TableHead>Bike</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {client.appointments.map((appointment) => (
+                        <TableRow key={appointment.id}>
+                          <TableCell className="whitespace-nowrap">
+                            {new Date(
+                              appointment.serviceDate
+                            ).toLocaleDateString("pt-BR")}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {appointment.title}
+                          </TableCell>
+                          <TableCell>{appointment.bike.model}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                appointment.status === "CONCLUIDO"
+                                  ? "default"
+                                  : appointment.status === "PENDENTE"
+                                  ? "secondary"
+                                  : "destructive"
+                              }
+                            >
+                              {appointment.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {appointment.totalCost
+                              ? new Intl.NumberFormat("pt-BR", {
+                                  style: "currency",
+                                  currency: "BRL",
+                                }).format(appointment.totalCost)
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" disabled>
+                              Ver Detalhes
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
-

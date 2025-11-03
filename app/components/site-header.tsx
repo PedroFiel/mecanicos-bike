@@ -1,17 +1,18 @@
 import { Separator } from "~/components/ui/separator"
 import { SidebarTrigger } from "~/components/ui/sidebar"
-import { useLocation } from "react-router"
-
-const routeTitles: Record<string, string> = {
-  "/": "Home",
-  "/dashboard": "Dashboard",
-  "/settings": "Settings",
-  "/account": "Account"
-};
+import { useMatches } from "react-router"
+import type { RouteHandle } from "~/types/route"
 
 export function SiteHeader() {
-  const location = useLocation();
-  const title = routeTitles[location.pathname] || "Home";
+  const matches = useMatches()
+  
+  const matchWithTitle = [...matches].reverse().find(
+    (match) => match.handle && (match.handle as RouteHandle).title
+  )
+  
+  const title = matchWithTitle 
+    ? (matchWithTitle.handle as RouteHandle).title 
+    : "Home"
 
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">

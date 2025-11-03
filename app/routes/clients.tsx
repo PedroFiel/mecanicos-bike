@@ -2,6 +2,7 @@ import { NavLink, useLoaderData } from "react-router"
 import type { Route } from "./+types/clients"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
+import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
   Card,
@@ -20,7 +21,11 @@ import {
 } from "~/components/ui/table"
 import { Badge } from "~/components/ui/badge"
 import { IconPlus, IconEye, IconUsers } from "@tabler/icons-react"
-import { formatPhone, formatCPF } from "~/types/client"
+import { formatCPF } from "~/types/client"
+
+export const handle: RouteHandle = {
+  title: "Clientes",
+};
 
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
@@ -93,8 +98,6 @@ export default function ClientsPage() {
                   <TableRow>
                     <TableHead className="min-w-[150px]">Nome</TableHead>
                     <TableHead className="min-w-[120px]">CPF</TableHead>
-                    <TableHead className="min-w-[120px]">Telefone</TableHead>
-                    <TableHead className="min-w-[180px]">Email</TableHead>
                     <TableHead className="text-center min-w-[80px]">Bikes</TableHead>
                     <TableHead className="text-center min-w-[120px]">Atendimentos</TableHead>
                     <TableHead className="text-right min-w-[140px]">Ações</TableHead>
@@ -108,21 +111,7 @@ export default function ClientsPage() {
                       </TableCell>
                       <TableCell>
                         {client.cpf ? (
-                          <code className="text-xs whitespace-nowrap">{formatCPF(client.cpf)}</code>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {client.phone ? (
-                          formatPhone(client.phone)
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {client.email ? (
-                          client.email
+                          <code className="text-base whitespace-nowrap">{formatCPF(client.cpf)}</code>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}

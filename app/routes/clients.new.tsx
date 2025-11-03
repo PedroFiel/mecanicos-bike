@@ -5,6 +5,11 @@ import prisma from "../../prisma/prisma"
 import { ClientForm } from "~/components/client-form"
 import { clientFormSchema, cleanCPF } from "~/types/client"
 import { z } from "zod"
+import type { RouteHandle } from "~/types/route"
+
+export const handle: RouteHandle = {
+  title: "Novo Cliente",
+};
 
 export async function action({ request }: Route.ActionArgs) {
   const userId = await requireAuth(request)

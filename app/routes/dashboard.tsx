@@ -1,8 +1,13 @@
 import { ChartAreaInteractive } from "~/components/chart-area-interactive";
 import { DataTable } from "~/components/data-table";
 import { SectionCards } from "~/components/section-cards";
+import type { RouteHandle } from "~/types/route";
 
 import data from "../dashboard/data.json";
+
+export const handle: RouteHandle = {
+  title: "Dashboard",
+};
 
 export default function Page() {
   return (
