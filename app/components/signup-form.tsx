@@ -1,4 +1,4 @@
-import { Form, Link } from "react-router"
+import { Form, NavLink } from "react-router"
 import { Button } from "~/components/ui/button"
 import {
   Card,
@@ -119,7 +119,7 @@ export function SignupForm({ errors = {}, ...props }: SignupFormProps) {
               <Field>
                 <Button type="submit">Criar Conta</Button>
                 <FieldDescription className="px-6 text-center">
-                  Já tem uma conta? <Link to="/login">Entrar</Link>
+                  Já tem uma conta? <NavLink to="/login">Entrar</NavLink>
                 </FieldDescription>
               </Field>
             </FieldGroup>

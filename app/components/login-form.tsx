@@ -14,7 +14,7 @@ import {
   FieldLabel,
 } from "~/components/ui/field"
 import { Input } from "~/components/ui/input"
-import { Link } from "react-router"
+import { NavLink } from "react-router"
 
 interface LoginFormProps extends React.ComponentProps<"div"> {
   errors?: Record<string, string>
@@ -72,7 +72,7 @@ export function LoginForm({
               <Field>
                 <Button type="submit">Entrar</Button>
                 <FieldDescription className="text-center">
-                  Não tem uma conta? <Link to="/register">Cadastre-se</Link>
+                  Não tem uma conta? <NavLink to="/register">Cadastre-se</NavLink>
                 </FieldDescription>
               </Field>
             </FieldGroup>

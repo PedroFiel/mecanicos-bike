@@ -1,9 +1,7 @@
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
 import { requireAuth } from "~/lib/auth.server";
-import { Form, useLoaderData } from "react-router";
+import { useLoaderData } from "react-router";
 import prisma from "prisma/prisma";
-import { Button } from "~/components/ui/button";
 
 export function meta({}: Route.MetaArgs) {
   return [
