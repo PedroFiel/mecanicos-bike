@@ -5,7 +5,7 @@ import { z } from "zod"
 import { LoginForm } from "~/components/login-form"
 import type { ActionData } from "~/types/actionData"
 import { createUserSession, getOptionalUser } from "~/lib/auth.server"
-import { loginSchema, parseZodErrors } from "~/types/auth"
+import { loginSchema, parseZodErrors } from "~/features/auth/types"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)

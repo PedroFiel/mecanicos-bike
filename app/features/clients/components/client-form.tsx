@@ -15,7 +15,7 @@ import {
 } from "~/components/ui/field"
 import { Input } from "~/components/ui/input"
 import { NavLink } from "react-router"
-import type { ClientFormData } from "~/types/client"
+import type { ClientFormData } from "~/features/clients/types"
 
 interface ClientFormProps extends React.ComponentProps<"div"> {
   errors?: Record<string, string>

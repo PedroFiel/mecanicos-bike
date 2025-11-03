@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs"
 import prisma from "../../prisma/prisma"
 import type { ActionData } from "~/types/actionData"
 import { getOptionalUser } from "~/lib/auth.server"
-import { signupSchema, parseZodErrors } from "~/types/auth"
+import { signupSchema, parseZodErrors } from "~/features/auth/types"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)

@@ -28,7 +28,7 @@ import {
   IconCalendar,
   IconUser
 } from "@tabler/icons-react"
-import { formatCPF, formatPhone } from "~/types/client"
+import { formatCPF, formatPhone } from "~/features/clients/types"
 
 export const handle: RouteHandle = {
   title: "Detalhes do Cliente",
@@ -206,9 +206,11 @@ export default function Page() {
                       : `${client.bikes.length} bike(s) cadastrada(s)`}
                   </CardDescription>
                 </div>
-                <Button size="sm" disabled>
-                  <IconPlus className="mr-2 h-4 w-4" />
-                  Nova Bike
+                <Button size="sm" asChild>
+                  <NavLink to={`/bikes/new?clientId=${client.id}`}>
+                    <IconPlus className="mr-2 h-4 w-4" />
+                    Nova Bike
+                  </NavLink>
                 </Button>
               </div>
             </CardHeader>
@@ -219,9 +221,11 @@ export default function Page() {
                   <p className="text-muted-foreground mb-4">
                     Este cliente ainda não possui bikes cadastradas
                   </p>
-                  <Button disabled>
-                    <IconPlus className="mr-2 h-4 w-4" />
-                    Cadastrar Primeira Bike
+                  <Button asChild>
+                    <NavLink to={`/bikes/new?clientId=${client.id}`}>
+                      <IconPlus className="mr-2 h-4 w-4" />
+                      Cadastrar Primeira Bike
+                    </NavLink>
                   </Button>
                 </div>
               ) : (
@@ -265,8 +269,10 @@ export default function Page() {
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">
-                              <Button variant="ghost" size="sm" disabled>
-                                Ver Detalhes
+                              <Button variant="ghost" size="sm" asChild>
+                                <NavLink to={`/bikes/${bike.id}`}>
+                                  Ver Detalhes
+                                </NavLink>
                               </Button>
                             </TableCell>
                           </TableRow>

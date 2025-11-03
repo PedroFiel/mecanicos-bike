@@ -21,7 +21,7 @@ import {
 } from "~/components/ui/table"
 import { Badge } from "~/components/ui/badge"
 import { IconPlus, IconEye, IconUsers } from "@tabler/icons-react"
-import { formatCPF } from "~/types/client"
+import { formatCPF } from "~/features/clients/types"
 
 export const handle: RouteHandle = {
   title: "Clientes",
