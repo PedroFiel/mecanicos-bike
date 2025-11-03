@@ -1,6 +1,6 @@
 import * as React from "react"
 import {
-  IconBike, IconDashboard, IconSettings
+  IconBike, IconDashboard, IconSettings, IconUsers
 } from "@tabler/icons-react"
 
 import { NavMain } from "~/components/nav-main"
@@ -35,6 +35,11 @@ const navData = {
       title: "Dashboard",
       url: "/dashboard",
       icon: IconDashboard,
+    },
+    {
+      title: "Clientes",
+      url: "/clients",
+      icon: IconUsers,
     }
   ],
   navSecondary: [

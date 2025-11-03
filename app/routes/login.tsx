@@ -5,11 +5,7 @@ import { z } from "zod"
 import { LoginForm } from "~/components/login-form"
 import type { ActionData } from "~/types/actionData"
 import { createUserSession, getOptionalUser } from "~/lib/auth.server"
-
-const loginSchema = z.object({
-  email: z.string().email("Endereço de email inválido"),
-  password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres"),
-})
+import { loginSchema, parseZodErrors } from "~/types/auth"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)
@@ -31,12 +27,7 @@ export async function action({ request }: ActionFunctionArgs) {
     loginSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return {
-        errors: error.issues.reduce((acc: Record<string, string>, err: z.ZodIssue) => {
-          acc[err.path[0] as string] = err.message
-          return acc
-        }, {} as Record<string, string>)
-      }
+      return { errors: parseZodErrors(error) }
     }
   }
 

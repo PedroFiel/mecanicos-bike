@@ -6,17 +6,7 @@ import bcrypt from "bcryptjs"
 import prisma from "../../prisma/prisma"
 import type { ActionData } from "~/types/actionData"
 import { getOptionalUser } from "~/lib/auth.server"
-
-const signupSchema = z.object({
-  name: z.string().min(1, "Nome é obrigatório"),
-  email: z.string().email("Endereço de email inválido"),
-  phone: z.string().optional(),
-  password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres"),
-  confirmPassword: z.string()
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "As senhas não coincidem",
-  path: ["confirmPassword"],
-})
+import { signupSchema, parseZodErrors } from "~/types/auth"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)
@@ -41,12 +31,7 @@ export async function action({ request }: ActionFunctionArgs) {
     signupSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return {
-        errors: error.issues.reduce((acc: Record<string, string>, err: z.ZodIssue) => {
-          acc[err.path[0] as string] = err.message
-          return acc
-        }, {} as Record<string, string>)
-      }
+      return { errors: parseZodErrors(error) }
     }
   }
 
