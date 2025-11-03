@@ -34,7 +34,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { user };
 }
 
-export default function Home() {
+export default function Page() {
   const { user } = useLoaderData<typeof loader>();
   
   return (

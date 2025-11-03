@@ -124,7 +124,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 }
 
-export default function EditClientPage({ params }: Route.ComponentProps) {
+export default function Page({ params }: Route.ComponentProps) {
   const { client } = useLoaderData<typeof loader>()
   const actionData = useActionData<typeof action>()
   const clientId = parseInt(params.clientId)

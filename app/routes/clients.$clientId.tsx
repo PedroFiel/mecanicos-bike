@@ -67,7 +67,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return { client }
 }
 
-export default function ClientDetailPage() {
+export default function Page() {
   const { client } = useLoaderData<typeof loader>()
   const [searchParams] = useSearchParams()
   const defaultTab = searchParams.get("tab") || "informacoes"

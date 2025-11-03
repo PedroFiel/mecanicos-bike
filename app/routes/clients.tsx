@@ -44,7 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { clients }
 }
 
-export default function ClientsPage() {
+export default function Page() {
   const { clients } = useLoaderData<typeof loader>()
 
   return (

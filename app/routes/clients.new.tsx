@@ -75,7 +75,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 }
 
-export default function NewClientPage() {
+export default function Page() {
   const actionData = useActionData<typeof action>()
 
   return (
