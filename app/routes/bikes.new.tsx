@@ -2,7 +2,7 @@ import { redirect, useActionData, useLoaderData, useSearchParams } from "react-r
 import type { Route } from "./+types/bikes.new"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
-import { BikeForm } from "~/features/bikes/components/bike-form"
+import { BikeForm } from "~/features/bikes/components"
 import { bikeFormSchema } from "~/features/bikes/types"
 import { z } from "zod"
 import type { RouteHandle } from "~/types/route"

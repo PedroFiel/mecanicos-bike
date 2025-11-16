@@ -44,7 +44,7 @@ const navData = {
   ],
   navSecondary: [
     {
-      title: "Settings",
+      title: "Configurações",
       url: "/settings",
       icon: IconSettings,
     }

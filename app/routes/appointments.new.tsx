@@ -2,7 +2,7 @@ import { redirect, useActionData, useLoaderData, useSearchParams } from "react-r
 import type { Route } from "./+types/appointments.new"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
-import { AppointmentForm } from "~/features/appointments/components/appointment-form"
+import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
 import type { RouteHandle } from "~/types/route"
