@@ -1,10 +1,10 @@
-import { redirect, useLoaderData, NavLink } from "react-router"
+import { redirect, NavLink } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
 import {
   Card,
-  CardContent,  
+  CardContent,
   CardHeader,
   CardTitle,
 } from "~/components/ui/card"

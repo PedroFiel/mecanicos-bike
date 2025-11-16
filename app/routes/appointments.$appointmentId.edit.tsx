@@ -1,4 +1,4 @@
-import { redirect, useActionData, useLoaderData } from "react-router"
+import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId.edit"
 import { requireAuth } from "~/lib/auth.server"
 import prisma from "../../prisma/prisma"
