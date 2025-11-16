@@ -4,6 +4,7 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "~/components/ui/sidebar"
+import { NavigationProgress } from "~/components/navigation-progress"
 
 import { Outlet, useLoaderData } from "react-router"
 import type { Route } from "./+types/layout"
@@ -44,6 +45,7 @@ export default function () {
         } as React.CSSProperties
       }
     >
+      <NavigationProgress />
       <AppSidebar variant="inset" user={user} />
       <SidebarInset>
         <SiteHeader />

@@ -10,7 +10,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "~/components/ui/sidebar"
-import { NavLink } from "react-router"
+import { NavLink, useLocation } from "react-router"
 
 export function NavSecondary({
   items,
@@ -22,20 +22,26 @@ export function NavSecondary({
     icon: Icon
   }[]
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
+  const location = useLocation()
+  
   return (
     <SidebarGroup {...props}>
       <SidebarGroupContent>
         <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton asChild>
-                <NavLink to={item.url}>
-                  <item.icon />
-                  <span>{item.title}</span>
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
+          {items.map((item) => {
+            const isActive = location.pathname === item.url || location.pathname.startsWith(item.url + '/')
+            
+            return (
+              <SidebarMenuItem key={item.title}>
+                <SidebarMenuButton isActive={isActive} asChild>
+                  <NavLink to={item.url}>
+                    <item.icon />
+                    <span>{item.title}</span>
+                  </NavLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

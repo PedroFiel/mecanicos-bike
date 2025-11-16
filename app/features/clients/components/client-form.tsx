@@ -14,8 +14,9 @@ import {
   FieldLabel,
 } from "~/components/ui/field"
 import { Input } from "~/components/ui/input"
-import { NavLink } from "react-router"
+import { NavLink, useNavigation, Form } from "react-router"
 import type { ClientFormData } from "~/features/clients/types"
+import { Spinner } from "~/components/ui/spinner"
 
 interface ClientFormProps extends React.ComponentProps<"div"> {
   errors?: Record<string, string>
@@ -32,6 +33,9 @@ export function ClientForm({
   clientId,
   ...props
 }: ClientFormProps) {
+  const navigation = useNavigation()
+  const isSubmitting = navigation.state === "submitting"
+  
   const cancelRoute = isEdit && clientId 
     ? `/clients/${clientId}` 
     : "/clients"
@@ -48,7 +52,7 @@ export function ClientForm({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form method="post">
+          <Form method="post">
             <FieldGroup>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field className="md:col-span-2">
@@ -170,20 +174,36 @@ export function ClientForm({
               </div>
 
               <div className="flex flex-col gap-3 mt-6 sm:flex-row sm:gap-4">
-                <Button type="submit" className="flex-1 w-full sm:w-auto">
-                  {isEdit ? "Atualizar Cliente" : "Salvar Cliente"}
+                <Button 
+                  type="submit" 
+                  className="flex-1 w-full sm:w-auto"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Spinner size="sm" className="mr-2" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>{isEdit ? "Atualizar Cliente" : "Salvar Cliente"}</>
+                  )}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   className="flex-1 w-full sm:w-auto"
-                  asChild
+                  disabled={isSubmitting}
+                  asChild={!isSubmitting}
                 >
-                  <NavLink to={cancelRoute}>Cancelar</NavLink>
+                  {!isSubmitting ? (
+                    <NavLink to={cancelRoute}>Cancelar</NavLink>
+                  ) : (
+                    <span>Cancelar</span>
+                  )}
                 </Button>
               </div>
             </FieldGroup>
-          </form>
+          </Form>
         </CardContent>
       </Card>
     </div>
