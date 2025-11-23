@@ -30,8 +30,10 @@ export default defineConfig({
             }
           }
         },
+
       },
     },
     chunkSizeWarningLimit: 600,
   },
 });
+
