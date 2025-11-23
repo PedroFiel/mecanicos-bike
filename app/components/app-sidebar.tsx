@@ -15,7 +15,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "~/components/ui/sidebar"
-import { Link, NavLink } from "react-router"
+import { NavLink } from "react-router"
 
 interface User {
   id: number
