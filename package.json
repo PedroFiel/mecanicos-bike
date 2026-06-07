@@ -70,6 +70,7 @@
     "@types/node": "^22",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "baseline-browser-mapping": "^2.10.34",
     "prisma": "6.17.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.20.6",
