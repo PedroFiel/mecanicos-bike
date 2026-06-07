@@ -20,4 +20,13 @@ export default [
     route("login", "routes/login.tsx"),
     route("register", "routes/signup.tsx"),
     route("logout", "routes/logout.tsx"),
+    // REST API — Clientes
+    route("api/clients", "routes/api.clients.ts"),
+    route("api/clients/:clientId", "routes/api.clients.$clientId.ts"),
+    // REST API — Bikes
+    route("api/bikes", "routes/api.bikes.ts"),
+    route("api/bikes/:bikeId", "routes/api.bikes.$bikeId.ts"),
+    // REST API — Atendimentos
+    route("api/appointments", "routes/api.appointments.ts"),
+    route("api/appointments/:appointmentId", "routes/api.appointments.$appointmentId.ts"),
 ] satisfies RouteConfig;
