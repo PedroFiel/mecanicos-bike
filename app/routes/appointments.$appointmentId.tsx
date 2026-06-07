@@ -1,7 +1,7 @@
-import { redirect, NavLink } from "react-router"
+import { NavLink } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getAppointmentById } from "~/services/appointments.server"
 import {
   Card,
   CardContent,
@@ -25,23 +25,8 @@ export const handle: RouteHandle = {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
-  const appointmentId = parseInt(params.appointmentId)
-
-  const appointment = await prisma.appointment.findFirst({
-    where: {
-      id: appointmentId,
-      userId: userId,
-    },
-    include: {
-      client: true,
-      bike: true,
-    },
-  })
-
-  if (!appointment) {
-    throw redirect("/clients")
-  }
-
+  const appointment = await getAppointmentById(Number(params.appointmentId), userId)
+  if (!appointment) throw new Response("Atendimento não encontrado", { status: 404 })
   return { appointment }
 }
 

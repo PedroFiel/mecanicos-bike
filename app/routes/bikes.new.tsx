@@ -1,7 +1,8 @@
 import { redirect, useActionData, useLoaderData, useSearchParams } from "react-router"
 import type { Route } from "./+types/bikes.new"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getClientById } from "~/services/clients.server"
+import { createBike } from "~/services/bikes.server"
 import { BikeForm } from "~/features/bikes/components"
 import { bikeFormSchema } from "~/features/bikes/types"
 import { z } from "zod"
@@ -16,22 +17,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url)
   const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientIdParam) {
-    throw new Response("Cliente não especificado", { status: 400 })
-  }
+  if (!clientIdParam) throw new Response("Cliente não especificado", { status: 400 })
 
-  const clientId = parseInt(clientIdParam)
-
-  const client = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-  })
-
-  if (!client) {
-    throw new Response("Cliente não encontrado", { status: 404 })
-  }
+  const client = await getClientById(Number(clientIdParam), userId)
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
 
   return { client }
 }
@@ -41,69 +30,39 @@ export async function action({ request }: Route.ActionArgs) {
 
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
-  
+
   const url = new URL(request.url)
   const clientIdParam = url.searchParams.get("clientId")
-
-  if (!clientIdParam) {
-    return {
-      errors: {
-        general: "Cliente não especificado",
-      },
-    }
-  }
+  if (!clientIdParam) return { errors: { general: "Cliente não especificado" } }
 
   const clientId = parseInt(clientIdParam)
 
-  const client = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-  })
-
-  if (!client) {
-    return {
-      errors: {
-        general: "Cliente não encontrado ou não autorizado",
-      },
-    }
-  }
-
+  let validated: z.infer<typeof bikeFormSchema>
   try {
-    const validated = bikeFormSchema.parse(data)
-
-    await prisma.bike.create({
-      data: {
-        userId,
-        clientId,
-        model: validated.model,
-        brand: validated.brand || null,
-        color: validated.color || null,
-        frameNumber: validated.frameNumber || null,
-        characteristics: validated.characteristics || null,
-      },
-    })
-
-    return redirect(`/clients/${clientId}?tab=bikes`)
+    validated = bikeFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
-
-    console.error("Erro ao criar bike:", error)
-    return {
-      errors: {
-        general: "Erro ao cadastrar bike. Tente novamente.",
-      },
-    }
+    throw error
   }
+
+  const bike = await createBike(userId, {
+    clientId,
+    model: validated.model,
+    brand: validated.brand || null,
+    color: validated.color || null,
+    frameNumber: validated.frameNumber || null,
+    characteristics: validated.characteristics || null,
+  })
+
+  if (!bike) return { errors: { general: "Cliente não encontrado" } }
+
+  return redirect(`/clients/${clientId}?tab=bikes`)
 }
 
 export default function Page() {

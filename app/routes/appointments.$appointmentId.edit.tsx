@@ -1,7 +1,7 @@
 import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getAppointmentById, updateAppointment } from "~/services/appointments.server"
 import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
@@ -13,32 +13,8 @@ export const handle: RouteHandle = {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
-  const appointmentId = parseInt(params.appointmentId)
-
-  const appointment = await prisma.appointment.findFirst({
-    where: {
-      id: appointmentId,
-      userId: userId,
-    },
-    include: {
-      client: {
-        include: {
-          bikes: {
-            select: {
-              id: true,
-              model: true,
-              brand: true,
-            },
-          },
-        },
-      },
-    },
-  })
-
-  if (!appointment) {
-    throw redirect("/clients")
-  }
-
+  const appointment = await getAppointmentById(Number(params.appointmentId), userId)
+  if (!appointment) throw new Response("Atendimento não encontrado", { status: 404 })
   return { appointment }
 }
 
@@ -56,37 +32,32 @@ export async function action({ request, params }: Route.ActionArgs) {
     bikeId: formData.get("bikeId"),
   }
 
+  let validatedData: z.infer<typeof appointmentFormSchema>
   try {
-    const validatedData = appointmentFormSchema.parse(data)
-
-    await prisma.appointment.updateMany({
-      where: {
-        id: appointmentId,
-        userId: userId,
-      },
-      data: {
-        title: validatedData.title,
-        description: validatedData.description || null,
-        serviceDate: new Date(validatedData.serviceDate),
-        status: validatedData.status as "PENDENTE" | "CONCLUIDO" | "CANCELADO",
-        totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
-        bikeId: parseInt(validatedData.bikeId),
-      },
-    })
-
-    throw redirect(`/appointments/${appointmentId}`)
+    validatedData = appointmentFormSchema.parse(data as unknown)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
     throw error
   }
+
+  const updated = await updateAppointment(appointmentId, userId, {
+    title: validatedData.title,
+    description: validatedData.description || null,
+    serviceDate: validatedData.serviceDate,
+    status: validatedData.status as "PENDENTE" | "CONCLUIDO" | "CANCELADO",
+    totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
+    bikeId: parseInt(validatedData.bikeId),
+  })
+
+  if (!updated) return { errors: { general: "Atendimento não encontrado" } }
+
+  return redirect(`/appointments/${appointmentId}`)
 }
 
 export default function Page({
@@ -103,7 +74,7 @@ export default function Page({
     title: appointment.title,
     description: appointment.description || "",
     serviceDate: formattedDate,
-    status: appointment.status,
+    status: appointment.status as "PENDENTE" | "CONCLUIDO" | "CANCELADO",
     totalCost: appointment.totalCost?.toString() || "",
     bikeId: appointment.bikeId.toString(),
   }

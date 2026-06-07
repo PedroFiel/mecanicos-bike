@@ -1,7 +1,8 @@
 import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.new"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getClientById } from "~/services/clients.server"
+import { createAppointment } from "~/services/appointments.server"
 import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
@@ -14,31 +15,15 @@ export const handle: RouteHandle = {
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
   const url = new URL(request.url)
-  const clientId = url.searchParams.get("clientId")
+  const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientId) {
-    throw redirect("/clients")
-  }
-  
-  const client = await prisma.client.findUnique({
-    where: { id: parseInt(clientId), userId: userId },
-    include: {
-      bikes: {
-        select: {
-          id: true,
-          model: true,
-          brand: true,
-        },
-      },
-    },
-  })
+  if (!clientIdParam) throw redirect("/clients")
 
-  if (!client) {
-    throw redirect("/clients")
-  }
+  const client = await getClientById(Number(clientIdParam), userId)
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
 
   if (client.bikes.length === 0) {
-    throw redirect(`/clients/${clientId}?tab=bikes`)
+    throw redirect(`/clients/${clientIdParam}?tab=bikes`)
   }
 
   return { client }
@@ -48,11 +33,9 @@ export async function action({ request }: Route.ActionArgs) {
   const userId = await requireAuth(request)
   const formData = await request.formData()
   const url = new URL(request.url)
-  const clientId = url.searchParams.get("clientId")
+  const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientId) {
-    return { errors: { general: "Cliente não especificado" } }
-  }
+  if (!clientIdParam) return { errors: { general: "Cliente não especificado" } }
 
   const data = {
     title: formData.get("title"),
@@ -63,35 +46,33 @@ export async function action({ request }: Route.ActionArgs) {
     bikeId: formData.get("bikeId"),
   }
 
+  let validatedData: z.infer<typeof appointmentFormSchema>
   try {
-    const validatedData = appointmentFormSchema.parse(data)
-
-    const appointment = await prisma.appointment.create({
-      data: {
-        title: validatedData.title,
-        description: validatedData.description || null,
-        serviceDate: new Date(validatedData.serviceDate),
-        status: validatedData.status as "PENDENTE" | "CONCLUIDO" | "CANCELADO",
-        totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
-        clientId: parseInt(clientId),
-        bikeId: parseInt(validatedData.bikeId),
-        userId: userId,
-      },
-    })
-
-    throw redirect(`/clients/${clientId}?tab=atendimentos`)
+    validatedData = appointmentFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
     throw error
   }
+
+  const appointment = await createAppointment(userId, {
+    clientId: parseInt(clientIdParam),
+    bikeId: parseInt(validatedData.bikeId),
+    title: validatedData.title,
+    description: validatedData.description || null,
+    serviceDate: validatedData.serviceDate ?? new Date().toISOString(),
+    status: validatedData.status ?? "CONCLUIDO",
+    totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
+  })
+
+  if (!appointment) return { errors: { general: "Cliente ou bike não encontrado" } }
+
+  return redirect(`/clients/${clientIdParam}?tab=atendimentos`)
 }
 
 export default function Page({

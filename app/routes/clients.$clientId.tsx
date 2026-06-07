@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData, useSearchParams } from "react-router"
 import type { Route } from "./+types/clients.$clientId"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getClientById } from "~/services/clients.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -42,34 +42,8 @@ export const handle: RouteHandle = {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
-  const clientId = parseInt(params.clientId)
-
-  const client = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-    include: {
-      bikes: {
-        orderBy: {
-          createdAt: "desc",
-        },
-      },
-      appointments: {
-        include: {
-          bike: true,
-        },
-        orderBy: {
-          serviceDate: "desc",
-        },
-      },
-    },
-  })
-
-  if (!client) {
-    throw new Response("Cliente não encontrado", { status: 404 })
-  }
-
+  const client = await getClientById(Number(params.clientId), userId)
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
   return { client }
 }
 

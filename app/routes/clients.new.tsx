@@ -1,7 +1,7 @@
 import { redirect, useActionData } from "react-router"
 import type { Route } from "./+types/clients.new"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { createClient } from "~/services/clients.server"
 import { ClientForm } from "~/features/clients/components"
 import { clientFormSchema, cleanCPF } from "~/features/clients/types"
 import { z } from "zod"
@@ -17,62 +17,47 @@ export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
 
+  let validated: z.infer<typeof clientFormSchema>
   try {
-    const validated = clientFormSchema.parse(data)
-
-    const cpfCleaned = validated.cpf ? cleanCPF(validated.cpf) : null
-
-    if (cpfCleaned) {
-      const existingClient = await prisma.client.findUnique({
-        where: { cpf: cpfCleaned },
-      })
-
-      if (existingClient) {
-        return {
-          errors: {
-            cpf: "Este CPF já está cadastrado",
-          },
-        }
-      }
-    }
-
-    let birthDate = null
-    if (validated.birthDate && validated.birthDate.trim() !== "") {
-      birthDate = new Date(validated.birthDate)
-    }
-
-    await prisma.client.create({
-      data: {
-        userId,
-        fullName: validated.fullName,
-        cpf: cpfCleaned,
-        email: validated.email || null,
-        phone: validated.phone || null,
-        birthDate,
-        address: validated.address || null,
-        notes: validated.notes || null,
-      },
-    })
-
-    return redirect("/clients?success=Cliente cadastrado com sucesso")
+    validated = clientFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
-
-    console.error("Erro ao criar cliente:", error)
-    return {
-      errors: {
-        general: "Erro ao cadastrar cliente. Tente novamente.",
-      },
-    }
+    throw error
   }
+
+  try {
+    await createClient(userId, {
+      fullName: validated.fullName,
+      cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
+      email: validated.email || null,
+      phone: validated.phone || null,
+      birthDate: validated.birthDate || null,
+      address: validated.address || null,
+      notes: validated.notes || null,
+    })
+  } catch (error) {
+    if (isPrismaUniqueError(error)) {
+      return { errors: { cpf: "Este CPF já está cadastrado" } }
+    }
+    throw error
+  }
+
+  return redirect("/clients?success=Cliente cadastrado com sucesso")
+}
+
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }
 
 export default function Page() {

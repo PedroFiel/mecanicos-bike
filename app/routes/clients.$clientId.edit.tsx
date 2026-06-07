@@ -1,7 +1,7 @@
 import { redirect, useActionData, useLoaderData } from "react-router"
 import type { Route } from "./+types/clients.$clientId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getClientById, updateClient } from "~/services/clients.server"
 import { ClientForm } from "~/features/clients/components"
 import { clientFormSchema, cleanCPF } from "~/features/clients/types"
 import { z } from "zod"
@@ -13,32 +13,18 @@ export const handle: RouteHandle = {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
-  const clientId = parseInt(params.clientId)
-
-  const client = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-  })
-
-  if (!client) {
-    throw new Response("Cliente não encontrado", { status: 404 })
-  }
-
-  const birthDate = client.birthDate
-    ? new Date(client.birthDate).toISOString().split("T")[0]
-    : ""
+  const raw = await getClientById(Number(params.clientId), userId)
+  if (!raw) throw new Response("Cliente não encontrado", { status: 404 })
 
   return {
     client: {
-      ...client,
-      cpf: client.cpf || "",
-      email: client.email || "",
-      phone: client.phone || "",
-      birthDate,
-      address: client.address || "",
-      notes: client.notes || "",
+      ...raw,
+      cpf: raw.cpf ?? "",
+      email: raw.email ?? "",
+      phone: raw.phone ?? "",
+      birthDate: raw.birthDate ? new Date(raw.birthDate).toISOString().split("T")[0] : "",
+      address: raw.address ?? "",
+      notes: raw.notes ?? "",
     },
   }
 }
@@ -47,81 +33,51 @@ export async function action({ request, params }: Route.ActionArgs) {
   const userId = await requireAuth(request)
   const clientId = parseInt(params.clientId)
 
-  const existingClient = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-  })
-
-  if (!existingClient) {
-    throw new Response("Cliente não encontrado", { status: 404 })
-  }
-
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
 
+  let validated: z.infer<typeof clientFormSchema>
   try {
-    const validated = clientFormSchema.parse(data)
-
-    const cpfCleaned = validated.cpf ? cleanCPF(validated.cpf) : null
-
-    if (cpfCleaned) {
-      const duplicateCpf = await prisma.client.findFirst({
-        where: {
-          cpf: cpfCleaned,
-          NOT: {
-            id: clientId,
-          },
-        },
-      })
-
-      if (duplicateCpf) {
-        return {
-          errors: {
-            cpf: "Este CPF já está cadastrado em outro cliente",
-          },
-        }
-      }
-    }
-
-    let birthDate = null
-    if (validated.birthDate && validated.birthDate.trim() !== "") {
-      birthDate = new Date(validated.birthDate)
-    }
-
-    await prisma.client.update({
-      where: { id: clientId },
-      data: {
-        fullName: validated.fullName,
-        cpf: cpfCleaned,
-        email: validated.email || null,
-        phone: validated.phone || null,
-        birthDate,
-        address: validated.address || null,
-        notes: validated.notes || null,
-      },
-    })
-
-    return redirect(`/clients/${clientId}`)
+    validated = clientFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
-
-    console.error("Erro ao atualizar cliente:", error)
-    return {
-      errors: {
-        general: "Erro ao atualizar cliente. Tente novamente.",
-      },
-    }
+    throw error
   }
+
+  try {
+    const updated = await updateClient(clientId, userId, {
+      fullName: validated.fullName,
+      cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
+      email: validated.email || null,
+      phone: validated.phone || null,
+      birthDate: validated.birthDate || null,
+      address: validated.address || null,
+      notes: validated.notes || null,
+    })
+    if (!updated) return { errors: { general: "Cliente não encontrado" } }
+  } catch (error) {
+    if (isPrismaUniqueError(error)) {
+      return { errors: { cpf: "Este CPF já está cadastrado em outro cliente" } }
+    }
+    throw error
+  }
+
+  return redirect(`/clients/${clientId}`)
+}
+
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }
 
 export default function Page({ params }: Route.ComponentProps) {
