@@ -28,9 +28,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const client = await prisma.client.findFirst({
     where: { id: clientId, userId: user.userId },
     include: {
-      bikes: true,
+      bikes: { orderBy: { createdAt: "desc" } },
       appointments: {
-        include: { serviceDetails: true },
+        include: { bike: { select: { id: true, model: true, brand: true } } },
         orderBy: { serviceDate: "desc" },
       },
     },
@@ -85,18 +85,36 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const { birthDate, ...rest } = result.data
-    const updated = await prisma.client.update({
-      where: { id: clientId },
-      data: {
-        ...rest,
-        ...(birthDate !== undefined && {
-          birthDate: birthDate ? new Date(birthDate) : null,
-        }),
-      },
-    })
-
-    return Response.json(updated)
+    try {
+      const updated = await prisma.client.update({
+        where: { id: clientId },
+        data: {
+          ...rest,
+          ...(birthDate !== undefined && {
+            birthDate: birthDate ? new Date(birthDate) : null,
+          }),
+        },
+      })
+      return Response.json(updated)
+    } catch (error) {
+      if (isPrismaUniqueError(error)) {
+        return Response.json(
+          { error: "CPF já cadastrado", details: { fieldErrors: { cpf: ["Este CPF já está cadastrado em outro cliente"] } } },
+          { status: 409 }
+        )
+      }
+      return Response.json({ error: "Erro interno do servidor" }, { status: 500 })
+    }
   }
 
   return Response.json({ error: "Método não permitido" }, { status: 405 })
+}
+
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }

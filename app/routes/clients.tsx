@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData } from "react-router"
 import type { Route } from "./+types/clients"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet } from "~/lib/api.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -28,19 +28,8 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-
-  const clients = await prisma.client.findMany({
-    where: { userId },
-    include: {
-      bikes: true,
-      appointments: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  })
-
+  await requireAuth(request)
+  const clients = await apiGet<{ id: number; fullName: string; cpf: string | null; _count: { bikes: number; appointments: number } }[]>(request, "/api/clients")
   return { clients }
 }
 
@@ -117,11 +106,11 @@ export default function Page() {
                         )}
                       </TableCell>
                       <TableCell className="text-center">
-                        <Badge variant="secondary">{client.bikes.length}</Badge>
+                        <Badge variant="secondary">{client._count.bikes}</Badge>
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge variant="secondary">
-                          {client.appointments.length}
+                          {client._count.appointments}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">

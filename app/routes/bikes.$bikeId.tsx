@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet } from "~/lib/api.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -34,28 +34,15 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-  const bikeId = parseInt(params.bikeId)
-
-  const bike = await prisma.bike.findFirst({
-    where: {
-      id: bikeId,
-      userId,
-    },
-    include: {
-      client: true,
-      appointments: {
-        orderBy: {
-          serviceDate: "desc",
-        },
-      },
-    },
-  })
-
-  if (!bike) {
-    throw new Response("Bike não encontrada", { status: 404 })
+  await requireAuth(request)
+  type Appt = { id: number; title: string; serviceDate: string; status: "PENDENTE" | "CONCLUIDO" | "CANCELADO"; totalCost: number | null }
+  type Bike = {
+    id: number; model: string; brand: string | null; color: string | null
+    frameNumber: string | null; characteristics: string | null; clientId: number
+    client: { id: number; fullName: string }
+    appointments: Appt[]
   }
-
+  const bike = await apiGet<Bike>(request, `/api/bikes/${params.bikeId}`)
   return { bike }
 }
 

@@ -1,7 +1,7 @@
 import { redirect, useActionData, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet, apiPut } from "~/lib/api.server"
 import { BikeForm } from "~/features/bikes/components"
 import { bikeFormSchema } from "~/features/bikes/types"
 import { z } from "zod"
@@ -12,85 +12,57 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-  const bikeId = parseInt(params.bikeId)
-
-  const bike = await prisma.bike.findFirst({
-    where: {
-      id: bikeId,
-      userId,
-    },
-    include: {
-      client: true,
-    },
-  })
-
-  if (!bike) {
-    throw new Response("Bike não encontrada", { status: 404 })
-  }
+  await requireAuth(request)
+  const raw = await apiGet<{
+    brand: string | null; color: string | null
+    frameNumber: string | null; characteristics: string | null
+    client: { fullName: string }; clientId: number
+    [key: string]: unknown
+  }>(request, `/api/bikes/${params.bikeId}`)
 
   return {
     bike: {
-      ...bike,
-      brand: bike.brand || "",
-      color: bike.color || "",
-      frameNumber: bike.frameNumber || "",
-      characteristics: bike.characteristics || "",
+      ...raw,
+      brand: raw.brand ?? "",
+      color: raw.color ?? "",
+      frameNumber: raw.frameNumber ?? "",
+      characteristics: raw.characteristics ?? "",
     },
   }
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  const userId = await requireAuth(request)
+  await requireAuth(request)
   const bikeId = parseInt(params.bikeId)
-
-  const existingBike = await prisma.bike.findFirst({
-    where: {
-      id: bikeId,
-      userId,
-    },
-  })
-
-  if (!existingBike) {
-    throw new Response("Bike não encontrada", { status: 404 })
-  }
 
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
 
+  let validated: z.infer<typeof bikeFormSchema>
   try {
-    const validated = bikeFormSchema.parse(data)
-
-    await prisma.bike.update({
-      where: { id: bikeId },
-      data: {
-        model: validated.model,
-        brand: validated.brand || null,
-        color: validated.color || null,
-        frameNumber: validated.frameNumber || null,
-        characteristics: validated.characteristics || null,
-      },
-    })
-
-    return redirect(`/bikes/${bikeId}`)
+    validated = bikeFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
-
-    console.error("Erro ao atualizar bike:", error)
-    return {
-      errors: {
-        general: "Erro ao atualizar bike. Tente novamente.",
-      },
-    }
+    throw error
   }
+
+  const result = await apiPut(request, `/api/bikes/${bikeId}`, {
+    model: validated.model,
+    brand: validated.brand || null,
+    color: validated.color || null,
+    frameNumber: validated.frameNumber || null,
+    characteristics: validated.characteristics || null,
+  })
+
+  if (!result.ok) return { errors: result.errors }
+
+  return redirect(`/bikes/${bikeId}`)
 }
 
 export default function EditBikePage({ params }: Route.ComponentProps) {

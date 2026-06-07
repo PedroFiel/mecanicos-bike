@@ -65,18 +65,36 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const { fullName, cpf, email, phone, birthDate, address, notes } = result.data
 
-  const client = await prisma.client.create({
-    data: {
-      userId: user.userId,
-      fullName,
-      cpf: cpf || null,
-      email: email || null,
-      phone: phone || null,
-      birthDate: birthDate ? new Date(birthDate) : null,
-      address: address || null,
-      notes: notes || null,
-    },
-  })
+  try {
+    const client = await prisma.client.create({
+      data: {
+        userId: user.userId,
+        fullName,
+        cpf: cpf || null,
+        email: email || null,
+        phone: phone || null,
+        birthDate: birthDate ? new Date(birthDate) : null,
+        address: address || null,
+        notes: notes || null,
+      },
+    })
+    return Response.json(client, { status: 201 })
+  } catch (error) {
+    if (isPrismaUniqueError(error)) {
+      return Response.json(
+        { error: "CPF já cadastrado", details: { fieldErrors: { cpf: ["Este CPF já está cadastrado"] } } },
+        { status: 409 }
+      )
+    }
+    return Response.json({ error: "Erro interno do servidor" }, { status: 500 })
+  }
+}
 
-  return Response.json(client, { status: 201 })
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }

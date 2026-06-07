@@ -26,7 +26,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const appointment = await prisma.appointment.findFirst({
     where: { id: appointmentId, userId: user.userId },
     include: {
-      client: { select: { id: true, fullName: true, phone: true } },
+      client: {
+        include: {
+          bikes: { select: { id: true, model: true, brand: true } },
+        },
+      },
       bike: true,
       serviceDetails: true,
     },

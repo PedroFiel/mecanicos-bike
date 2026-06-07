@@ -1,7 +1,7 @@
 import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.new"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet, apiPost } from "~/lib/api.server"
 import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
@@ -12,30 +12,16 @@ export const handle: RouteHandle = {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
+  await requireAuth(request)
   const url = new URL(request.url)
   const clientId = url.searchParams.get("clientId")
 
-  if (!clientId) {
-    throw redirect("/clients")
-  }
-  
-  const client = await prisma.client.findUnique({
-    where: { id: parseInt(clientId), userId: userId },
-    include: {
-      bikes: {
-        select: {
-          id: true,
-          model: true,
-          brand: true,
-        },
-      },
-    },
-  })
+  if (!clientId) throw redirect("/clients")
 
-  if (!client) {
-    throw redirect("/clients")
-  }
+  const client = await apiGet<{
+    id: number; fullName: string
+    bikes: { id: number; model: string; brand: string | null }[]
+  }>(request, `/api/clients/${clientId}`)
 
   if (client.bikes.length === 0) {
     throw redirect(`/clients/${clientId}?tab=bikes`)
@@ -45,14 +31,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const userId = await requireAuth(request)
+  await requireAuth(request)
   const formData = await request.formData()
   const url = new URL(request.url)
   const clientId = url.searchParams.get("clientId")
 
-  if (!clientId) {
-    return { errors: { general: "Cliente não especificado" } }
-  }
+  if (!clientId) return { errors: { general: "Cliente não especificado" } }
 
   const data = {
     title: formData.get("title"),
@@ -63,35 +47,33 @@ export async function action({ request }: Route.ActionArgs) {
     bikeId: formData.get("bikeId"),
   }
 
+  let validatedData: z.infer<typeof appointmentFormSchema>
   try {
-    const validatedData = appointmentFormSchema.parse(data)
-
-    const appointment = await prisma.appointment.create({
-      data: {
-        title: validatedData.title,
-        description: validatedData.description || null,
-        serviceDate: new Date(validatedData.serviceDate),
-        status: validatedData.status as "PENDENTE" | "CONCLUIDO" | "CANCELADO",
-        totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
-        clientId: parseInt(clientId),
-        bikeId: parseInt(validatedData.bikeId),
-        userId: userId,
-      },
-    })
-
-    throw redirect(`/clients/${clientId}?tab=atendimentos`)
+    validatedData = appointmentFormSchema.parse(data)
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {}
       error.issues.forEach((issue) => {
-        if (issue.path[0]) {
-          errors[issue.path[0].toString()] = issue.message
-        }
+        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
       })
       return { errors }
     }
     throw error
   }
+
+  const result = await apiPost(request, "/api/appointments", {
+    clientId: parseInt(clientId),
+    bikeId: parseInt(validatedData.bikeId),
+    title: validatedData.title,
+    description: validatedData.description || null,
+    serviceDate: validatedData.serviceDate,
+    status: validatedData.status,
+    totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
+  })
+
+  if (!result.ok) return { errors: result.errors }
+
+  return redirect(`/clients/${clientId}?tab=atendimentos`)
 }
 
 export default function Page({

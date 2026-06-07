@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData, useSearchParams } from "react-router"
 import type { Route } from "./+types/clients.$clientId"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet } from "~/lib/api.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -41,35 +41,20 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-  const clientId = parseInt(params.clientId)
-
-  const client = await prisma.client.findFirst({
-    where: {
-      id: clientId,
-      userId,
-    },
-    include: {
-      bikes: {
-        orderBy: {
-          createdAt: "desc",
-        },
-      },
-      appointments: {
-        include: {
-          bike: true,
-        },
-        orderBy: {
-          serviceDate: "desc",
-        },
-      },
-    },
-  })
-
-  if (!client) {
-    throw new Response("Cliente não encontrado", { status: 404 })
+  await requireAuth(request)
+  type Status = "PENDENTE" | "CONCLUIDO" | "CANCELADO"
+  type Bike = { id: number; model: string; brand: string | null; color: string | null }
+  type Appt = {
+    id: number; title: string; serviceDate: string; status: Status
+    totalCost: number | null; bikeId: number
+    bike: { id: number; model: string; brand: string | null }
   }
-
+  type Client = {
+    id: number; fullName: string; cpf: string | null; email: string | null
+    phone: string | null; birthDate: string | null; address: string | null; notes: string | null
+    bikes: Bike[]; appointments: Appt[]
+  }
+  const client = await apiGet<Client>(request, `/api/clients/${params.clientId}`)
   return { client }
 }
 

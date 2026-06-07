@@ -1,7 +1,7 @@
-import { redirect, NavLink } from "react-router"
+import { NavLink } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { apiGet } from "~/lib/api.server"
 import {
   Card,
   CardContent,
@@ -24,24 +24,19 @@ export const handle: RouteHandle = {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-  const appointmentId = parseInt(params.appointmentId)
-
-  const appointment = await prisma.appointment.findFirst({
-    where: {
-      id: appointmentId,
-      userId: userId,
-    },
-    include: {
-      client: true,
-      bike: true,
-    },
-  })
-
-  if (!appointment) {
-    throw redirect("/clients")
+  await requireAuth(request)
+  type ServiceDetail = { id: number; partReplaced: string | null; workDone: string | null; cost: number | null }
+  type Appointment = {
+    id: number; title: string; description: string | null
+    serviceDate: string; status: "PENDENTE" | "CONCLUIDO" | "CANCELADO"; totalCost: number | null
+    client: { id: number; fullName: string; phone: string | null }
+    bike: { id: number; model: string; brand: string | null; color: string | null; frameNumber: string | null; characteristics: string | null }
+    serviceDetails: ServiceDetail[]
   }
-
+  const appointment = await apiGet<Appointment>(
+    request,
+    `/api/appointments/${params.appointmentId}`
+  )
   return { appointment }
 }
 
