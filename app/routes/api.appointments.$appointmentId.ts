@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import prisma from "../../prisma/prisma"
 import { getUserFromRequest } from "~/lib/jwt.server"
+import { getAppointmentById, updateAppointment, deleteAppointment } from "~/services/appointments.server"
 
 const updateAppointmentSchema = z.object({
   title: z.string().min(1).optional(),
@@ -9,36 +9,19 @@ const updateAppointmentSchema = z.object({
   serviceDate: z.string().optional(),
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
   totalCost: z.number().nonnegative().optional().nullable(),
+  bikeId: z.number().int().positive().optional(),
 })
 
 // GET /api/appointments/:appointmentId — retorna um atendimento com todos os detalhes
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const appointmentId = Number(params.appointmentId)
-  if (isNaN(appointmentId)) {
-    return Response.json({ error: "ID inválido" }, { status: 400 })
-  }
+  if (isNaN(appointmentId)) return Response.json({ error: "ID inválido" }, { status: 400 })
 
-  const appointment = await prisma.appointment.findFirst({
-    where: { id: appointmentId, userId: user.userId },
-    include: {
-      client: {
-        include: {
-          bikes: { select: { id: true, model: true, brand: true } },
-        },
-      },
-      bike: true,
-      serviceDetails: true,
-    },
-  })
-
-  if (!appointment) {
-    return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
-  }
+  const appointment = await getAppointmentById(appointmentId, user.userId)
+  if (!appointment) return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
 
   return Response.json(appointment)
 }
@@ -47,26 +30,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // DELETE /api/appointments/:appointmentId — remove um atendimento
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const appointmentId = Number(params.appointmentId)
-  if (isNaN(appointmentId)) {
-    return Response.json({ error: "ID inválido" }, { status: 400 })
-  }
-
-  const exists = await prisma.appointment.findFirst({
-    where: { id: appointmentId, userId: user.userId },
-  })
-  if (!exists) {
-    return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
-  }
+  if (isNaN(appointmentId)) return Response.json({ error: "ID inválido" }, { status: 400 })
 
   if (request.method === "DELETE") {
-    // Remove os detalhes do serviço antes de remover o atendimento (FK constraint)
-    await prisma.serviceDetail.deleteMany({ where: { appointmentId } })
-    await prisma.appointment.delete({ where: { id: appointmentId } })
+    const deleted = await deleteAppointment(appointmentId, user.userId)
+    if (!deleted) return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
     return Response.json({ message: "Atendimento removido com sucesso" })
   }
 
@@ -86,19 +57,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       )
     }
 
-    const { serviceDate, ...rest } = result.data
-    const updated = await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        ...rest,
-        ...(serviceDate !== undefined && { serviceDate: new Date(serviceDate) }),
-      },
-      include: {
-        client: { select: { fullName: true } },
-        bike: { select: { model: true } },
-        serviceDetails: true,
-      },
-    })
+    const updated = await updateAppointment(appointmentId, user.userId, result.data)
+    if (!updated) return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
 
     return Response.json(updated)
   }

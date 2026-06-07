@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet } from "~/lib/api.server"
+import { getBikeById } from "~/services/bikes.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -34,15 +34,9 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireAuth(request)
-  type Appt = { id: number; title: string; serviceDate: string; status: "PENDENTE" | "CONCLUIDO" | "CANCELADO"; totalCost: number | null }
-  type Bike = {
-    id: number; model: string; brand: string | null; color: string | null
-    frameNumber: string | null; characteristics: string | null; clientId: number
-    client: { id: number; fullName: string }
-    appointments: Appt[]
-  }
-  const bike = await apiGet<Bike>(request, `/api/bikes/${params.bikeId}`)
+  const userId = await requireAuth(request)
+  const bike = await getBikeById(Number(params.bikeId), userId)
+  if (!bike) throw new Response("Bike não encontrada", { status: 404 })
   return { bike }
 }
 

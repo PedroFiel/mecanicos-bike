@@ -1,7 +1,7 @@
 import { redirect, useActionData } from "react-router"
 import type { Route } from "./+types/clients.new"
 import { requireAuth } from "~/lib/auth.server"
-import { apiPost } from "~/lib/api.server"
+import { createClient } from "~/services/clients.server"
 import { ClientForm } from "~/features/clients/components"
 import { clientFormSchema, cleanCPF } from "~/features/clients/types"
 import { z } from "zod"
@@ -12,7 +12,7 @@ export const handle: RouteHandle = {
 };
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
 
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
@@ -31,19 +31,33 @@ export async function action({ request }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPost(request, "/api/clients", {
-    fullName: validated.fullName,
-    cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
-    email: validated.email || null,
-    phone: validated.phone || null,
-    birthDate: validated.birthDate || null,
-    address: validated.address || null,
-    notes: validated.notes || null,
-  })
-
-  if (!result.ok) return { errors: result.errors }
+  try {
+    await createClient(userId, {
+      fullName: validated.fullName,
+      cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
+      email: validated.email || null,
+      phone: validated.phone || null,
+      birthDate: validated.birthDate || null,
+      address: validated.address || null,
+      notes: validated.notes || null,
+    })
+  } catch (error) {
+    if (isPrismaUniqueError(error)) {
+      return { errors: { cpf: "Este CPF já está cadastrado" } }
+    }
+    throw error
+  }
 
   return redirect("/clients?success=Cliente cadastrado com sucesso")
+}
+
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }
 
 export default function Page() {

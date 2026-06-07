@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import prisma from "../../prisma/prisma"
 import { getUserFromRequest } from "~/lib/jwt.server"
+import { getClientById, updateClient, deleteClient } from "~/services/clients.server"
 
 const updateClientSchema = z.object({
   fullName: z.string().min(1).optional(),
@@ -16,29 +16,13 @@ const updateClientSchema = z.object({
 // GET /api/clients/:clientId — retorna dados completos de um cliente
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const clientId = Number(params.clientId)
-  if (isNaN(clientId)) {
-    return Response.json({ error: "ID inválido" }, { status: 400 })
-  }
+  if (isNaN(clientId)) return Response.json({ error: "ID inválido" }, { status: 400 })
 
-  const client = await prisma.client.findFirst({
-    where: { id: clientId, userId: user.userId },
-    include: {
-      bikes: { orderBy: { createdAt: "desc" } },
-      appointments: {
-        include: { bike: { select: { id: true, model: true, brand: true } } },
-        orderBy: { serviceDate: "desc" },
-      },
-    },
-  })
-
-  if (!client) {
-    return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
-  }
+  const client = await getClientById(clientId, user.userId)
+  if (!client) return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
 
   return Response.json(client)
 }
@@ -47,24 +31,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // DELETE /api/clients/:clientId — remove o cliente
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const clientId = Number(params.clientId)
-  if (isNaN(clientId)) {
-    return Response.json({ error: "ID inválido" }, { status: 400 })
-  }
-
-  const exists = await prisma.client.findFirst({
-    where: { id: clientId, userId: user.userId },
-  })
-  if (!exists) {
-    return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
-  }
+  if (isNaN(clientId)) return Response.json({ error: "ID inválido" }, { status: 400 })
 
   if (request.method === "DELETE") {
-    await prisma.client.delete({ where: { id: clientId } })
+    const deleted = await deleteClient(clientId, user.userId)
+    if (!deleted) return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
     return Response.json({ message: "Cliente removido com sucesso" })
   }
 
@@ -84,17 +58,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
       )
     }
 
-    const { birthDate, ...rest } = result.data
     try {
-      const updated = await prisma.client.update({
-        where: { id: clientId },
-        data: {
-          ...rest,
-          ...(birthDate !== undefined && {
-            birthDate: birthDate ? new Date(birthDate) : null,
-          }),
-        },
-      })
+      const updated = await updateClient(clientId, user.userId, result.data)
+      if (!updated) return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
       return Response.json(updated)
     } catch (error) {
       if (isPrismaUniqueError(error)) {

@@ -1,7 +1,7 @@
 import { NavLink, useLoaderData } from "react-router"
 import type { Route } from "./+types/clients"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet } from "~/lib/api.server"
+import { listClients } from "~/services/clients.server"
 import type { RouteHandle } from "~/types/route"
 import { Button } from "~/components/ui/button"
 import {
@@ -28,8 +28,8 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireAuth(request)
-  const clients = await apiGet<{ id: number; fullName: string; cpf: string | null; _count: { bikes: number; appointments: number } }[]>(request, "/api/clients")
+  const userId = await requireAuth(request)
+  const clients = await listClients(userId)
   return { clients }
 }
 

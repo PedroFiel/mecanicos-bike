@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import prisma from "../../prisma/prisma"
 import { getUserFromRequest } from "~/lib/jwt.server"
+import { listBikes, createBike } from "~/services/bikes.server"
 
 const createBikeSchema = z.object({
   clientId: z.number().int().positive("Cliente é obrigatório"),
@@ -16,33 +16,20 @@ const createBikeSchema = z.object({
 // Query params opcionais: ?clientId=1
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const url = new URL(request.url)
-  const clientId = url.searchParams.get("clientId")
+  const clientIdParam = url.searchParams.get("clientId")
+  const clientId = clientIdParam && !isNaN(Number(clientIdParam)) ? Number(clientIdParam) : undefined
 
-  const bikes = await prisma.bike.findMany({
-    where: {
-      userId: user.userId,
-      ...(clientId && !isNaN(Number(clientId)) && { clientId: Number(clientId) }),
-    },
-    include: {
-      client: { select: { id: true, fullName: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  })
-
+  const bikes = await listBikes(user.userId, clientId)
   return Response.json(bikes)
 }
 
 // POST /api/bikes — cadastra uma nova bike para um cliente
 export async function action({ request }: ActionFunctionArgs) {
   const user = getUserFromRequest(request)
-  if (!user) {
-    return Response.json({ error: "Não autorizado" }, { status: 401 })
-  }
+  if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   if (request.method !== "POST") {
     return Response.json({ error: "Método não permitido" }, { status: 405 })
@@ -63,29 +50,8 @@ export async function action({ request }: ActionFunctionArgs) {
     )
   }
 
-  const { clientId, model, brand, color, frameNumber, characteristics } = result.data
-
-  const clientExists = await prisma.client.findFirst({
-    where: { id: clientId, userId: user.userId },
-  })
-  if (!clientExists) {
-    return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
-  }
-
-  const bike = await prisma.bike.create({
-    data: {
-      userId: user.userId,
-      clientId,
-      model,
-      brand: brand || null,
-      color: color || null,
-      frameNumber: frameNumber || null,
-      characteristics: characteristics || null,
-    },
-    include: {
-      client: { select: { fullName: true } },
-    },
-  })
+  const bike = await createBike(user.userId, result.data)
+  if (!bike) return Response.json({ error: "Cliente não encontrado" }, { status: 404 })
 
   return Response.json(bike, { status: 201 })
 }

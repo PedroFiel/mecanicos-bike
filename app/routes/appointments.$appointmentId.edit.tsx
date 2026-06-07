@@ -1,7 +1,7 @@
 import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet, apiPut } from "~/lib/api.server"
+import { getAppointmentById, updateAppointment } from "~/services/appointments.server"
 import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
@@ -12,18 +12,14 @@ export const handle: RouteHandle = {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireAuth(request)
-  const appointment = await apiGet<{
-    id: number; clientId: number; bikeId: number
-    title: string; description: string | null
-    serviceDate: string; status: string; totalCost: number | null
-    client: { fullName: string; bikes: { id: number; model: string; brand: string | null }[] }
-  }>(request, `/api/appointments/${params.appointmentId}`)
+  const userId = await requireAuth(request)
+  const appointment = await getAppointmentById(Number(params.appointmentId), userId)
+  if (!appointment) throw new Response("Atendimento não encontrado", { status: 404 })
   return { appointment }
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const appointmentId = parseInt(params.appointmentId)
   const formData = await request.formData()
 
@@ -50,7 +46,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPut(request, `/api/appointments/${appointmentId}`, {
+  const updated = await updateAppointment(appointmentId, userId, {
     title: validatedData.title,
     description: validatedData.description || null,
     serviceDate: validatedData.serviceDate,
@@ -59,7 +55,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     bikeId: parseInt(validatedData.bikeId),
   })
 
-  if (!result.ok) return { errors: result.errors }
+  if (!updated) return { errors: { general: "Atendimento não encontrado" } }
 
   return redirect(`/appointments/${appointmentId}`)
 }

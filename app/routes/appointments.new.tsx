@@ -1,7 +1,8 @@
 import { redirect } from "react-router"
 import type { Route } from "./+types/appointments.new"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet, apiPost } from "~/lib/api.server"
+import { getClientById } from "~/services/clients.server"
+import { createAppointment } from "~/services/appointments.server"
 import { AppointmentForm } from "~/features/appointments/components"
 import { appointmentFormSchema } from "~/features/appointments/types"
 import { z } from "zod"
@@ -12,31 +13,29 @@ export const handle: RouteHandle = {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const url = new URL(request.url)
-  const clientId = url.searchParams.get("clientId")
+  const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientId) throw redirect("/clients")
+  if (!clientIdParam) throw redirect("/clients")
 
-  const client = await apiGet<{
-    id: number; fullName: string
-    bikes: { id: number; model: string; brand: string | null }[]
-  }>(request, `/api/clients/${clientId}`)
+  const client = await getClientById(Number(clientIdParam), userId)
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
 
   if (client.bikes.length === 0) {
-    throw redirect(`/clients/${clientId}?tab=bikes`)
+    throw redirect(`/clients/${clientIdParam}?tab=bikes`)
   }
 
   return { client }
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const formData = await request.formData()
   const url = new URL(request.url)
-  const clientId = url.searchParams.get("clientId")
+  const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientId) return { errors: { general: "Cliente não especificado" } }
+  if (!clientIdParam) return { errors: { general: "Cliente não especificado" } }
 
   const data = {
     title: formData.get("title"),
@@ -61,19 +60,19 @@ export async function action({ request }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPost(request, "/api/appointments", {
-    clientId: parseInt(clientId),
+  const appointment = await createAppointment(userId, {
+    clientId: parseInt(clientIdParam),
     bikeId: parseInt(validatedData.bikeId),
     title: validatedData.title,
     description: validatedData.description || null,
-    serviceDate: validatedData.serviceDate,
-    status: validatedData.status,
+    serviceDate: validatedData.serviceDate ?? new Date().toISOString(),
+    status: validatedData.status ?? "CONCLUIDO",
     totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
   })
 
-  if (!result.ok) return { errors: result.errors }
+  if (!appointment) return { errors: { general: "Cliente ou bike não encontrado" } }
 
-  return redirect(`/clients/${clientId}?tab=atendimentos`)
+  return redirect(`/clients/${clientIdParam}?tab=atendimentos`)
 }
 
 export default function Page({

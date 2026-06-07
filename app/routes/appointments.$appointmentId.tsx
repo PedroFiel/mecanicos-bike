@@ -1,7 +1,7 @@
 import { NavLink } from "react-router"
 import type { Route } from "./+types/appointments.$appointmentId"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet } from "~/lib/api.server"
+import { getAppointmentById } from "~/services/appointments.server"
 import {
   Card,
   CardContent,
@@ -24,19 +24,9 @@ export const handle: RouteHandle = {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireAuth(request)
-  type ServiceDetail = { id: number; partReplaced: string | null; workDone: string | null; cost: number | null }
-  type Appointment = {
-    id: number; title: string; description: string | null
-    serviceDate: string; status: "PENDENTE" | "CONCLUIDO" | "CANCELADO"; totalCost: number | null
-    client: { id: number; fullName: string; phone: string | null }
-    bike: { id: number; model: string; brand: string | null; color: string | null; frameNumber: string | null; characteristics: string | null }
-    serviceDetails: ServiceDetail[]
-  }
-  const appointment = await apiGet<Appointment>(
-    request,
-    `/api/appointments/${params.appointmentId}`
-  )
+  const userId = await requireAuth(request)
+  const appointment = await getAppointmentById(Number(params.appointmentId), userId)
+  if (!appointment) throw new Response("Atendimento não encontrado", { status: 404 })
   return { appointment }
 }
 

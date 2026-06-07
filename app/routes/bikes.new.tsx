@@ -1,7 +1,8 @@
 import { redirect, useActionData, useLoaderData, useSearchParams } from "react-router"
 import type { Route } from "./+types/bikes.new"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet, apiPost } from "~/lib/api.server"
+import { getClientById } from "~/services/clients.server"
+import { createBike } from "~/services/bikes.server"
 import { BikeForm } from "~/features/bikes/components"
 import { bikeFormSchema } from "~/features/bikes/types"
 import { z } from "zod"
@@ -12,24 +13,20 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const url = new URL(request.url)
   const clientIdParam = url.searchParams.get("clientId")
 
-  if (!clientIdParam) {
-    throw new Response("Cliente não especificado", { status: 400 })
-  }
+  if (!clientIdParam) throw new Response("Cliente não especificado", { status: 400 })
 
-  const client = await apiGet<{ id: number; fullName: string }>(
-    request,
-    `/api/clients/${clientIdParam}`
-  )
+  const client = await getClientById(Number(clientIdParam), userId)
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
 
   return { client }
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
 
   const formData = await request.formData()
   const data = Object.fromEntries(formData)
@@ -54,7 +51,7 @@ export async function action({ request }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPost(request, "/api/bikes", {
+  const bike = await createBike(userId, {
     clientId,
     model: validated.model,
     brand: validated.brand || null,
@@ -63,7 +60,7 @@ export async function action({ request }: Route.ActionArgs) {
     characteristics: validated.characteristics || null,
   })
 
-  if (!result.ok) return { errors: result.errors }
+  if (!bike) return { errors: { general: "Cliente não encontrado" } }
 
   return redirect(`/clients/${clientId}?tab=bikes`)
 }

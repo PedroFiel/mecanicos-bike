@@ -1,7 +1,7 @@
 import { redirect, useActionData, useLoaderData } from "react-router"
 import type { Route } from "./+types/clients.$clientId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet, apiPut } from "~/lib/api.server"
+import { getClientById, updateClient } from "~/services/clients.server"
 import { ClientForm } from "~/features/clients/components"
 import { clientFormSchema, cleanCPF } from "~/features/clients/types"
 import { z } from "zod"
@@ -12,12 +12,9 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireAuth(request)
-  const raw = await apiGet<{
-    id: number; fullName: string
-    cpf: string | null; email: string | null; phone: string | null
-    birthDate: string | null; address: string | null; notes: string | null
-  }>(request, `/api/clients/${params.clientId}`)
+  const userId = await requireAuth(request)
+  const raw = await getClientById(Number(params.clientId), userId)
+  if (!raw) throw new Response("Cliente não encontrado", { status: 404 })
 
   return {
     client: {
@@ -33,7 +30,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const clientId = parseInt(params.clientId)
 
   const formData = await request.formData()
@@ -53,19 +50,34 @@ export async function action({ request, params }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPut(request, `/api/clients/${clientId}`, {
-    fullName: validated.fullName,
-    cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
-    email: validated.email || null,
-    phone: validated.phone || null,
-    birthDate: validated.birthDate || null,
-    address: validated.address || null,
-    notes: validated.notes || null,
-  })
-
-  if (!result.ok) return { errors: result.errors }
+  try {
+    const updated = await updateClient(clientId, userId, {
+      fullName: validated.fullName,
+      cpf: validated.cpf ? cleanCPF(validated.cpf) : null,
+      email: validated.email || null,
+      phone: validated.phone || null,
+      birthDate: validated.birthDate || null,
+      address: validated.address || null,
+      notes: validated.notes || null,
+    })
+    if (!updated) return { errors: { general: "Cliente não encontrado" } }
+  } catch (error) {
+    if (isPrismaUniqueError(error)) {
+      return { errors: { cpf: "Este CPF já está cadastrado em outro cliente" } }
+    }
+    throw error
+  }
 
   return redirect(`/clients/${clientId}`)
+}
+
+function isPrismaUniqueError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "P2002"
+  )
 }
 
 export default function Page({ params }: Route.ComponentProps) {

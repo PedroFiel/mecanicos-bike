@@ -1,7 +1,7 @@
 import { redirect, useActionData, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId.edit"
 import { requireAuth } from "~/lib/auth.server"
-import { apiGet, apiPut } from "~/lib/api.server"
+import { getBikeById, updateBike } from "~/services/bikes.server"
 import { BikeForm } from "~/features/bikes/components"
 import { bikeFormSchema } from "~/features/bikes/types"
 import { z } from "zod"
@@ -12,13 +12,9 @@ export const handle: RouteHandle = {
 };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireAuth(request)
-  const raw = await apiGet<{
-    brand: string | null; color: string | null
-    frameNumber: string | null; characteristics: string | null
-    client: { fullName: string }; clientId: number
-    [key: string]: unknown
-  }>(request, `/api/bikes/${params.bikeId}`)
+  const userId = await requireAuth(request)
+  const raw = await getBikeById(Number(params.bikeId), userId)
+  if (!raw) throw new Response("Bike não encontrada", { status: 404 })
 
   return {
     bike: {
@@ -32,7 +28,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireAuth(request)
+  const userId = await requireAuth(request)
   const bikeId = parseInt(params.bikeId)
 
   const formData = await request.formData()
@@ -52,7 +48,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     throw error
   }
 
-  const result = await apiPut(request, `/api/bikes/${bikeId}`, {
+  const updated = await updateBike(bikeId, userId, {
     model: validated.model,
     brand: validated.brand || null,
     color: validated.color || null,
@@ -60,7 +56,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     characteristics: validated.characteristics || null,
   })
 
-  if (!result.ok) return { errors: result.errors }
+  if (!updated) return { errors: { general: "Bike não encontrada" } }
 
   return redirect(`/bikes/${bikeId}`)
 }
