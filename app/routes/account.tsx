@@ -1,7 +1,7 @@
 import { useActionData, useLoaderData } from "react-router"
 import type { Route } from "./+types/account"
 import { requireAuth } from "~/lib/auth.server"
-import prisma from "../../prisma/prisma"
+import { getUserById, isEmailTaken, updateUserProfile } from "~/services/users.server"
 import { UserProfileForm } from "~/features/auth/components"
 import { userProfileSchema, parseZodErrors } from "~/features/auth/types"
 import { z } from "zod"
@@ -15,18 +15,7 @@ export const handle: RouteHandle = {
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireAuth(request)
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      image: true,
-    },
-  })
+  const user = await getUserById(userId)
 
   if (!user) {
     throw new Response("Usuário não encontrado", { status: 404 })
@@ -50,16 +39,7 @@ export async function action({ request }: Route.ActionArgs) {
   try {
     const validated = userProfileSchema.parse(data)
 
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        email: validated.email,
-        NOT: {
-          id: userId,
-        },
-      },
-    })
-
-    if (existingUser) {
+    if (await isEmailTaken(validated.email, userId)) {
       return {
         errors: {
           email: "Este email já está em uso por outro usuário",
@@ -81,14 +61,11 @@ export async function action({ request }: Route.ActionArgs) {
       }
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        name: validated.name,
-        email: validated.email,
-        phone: validated.phone || null,
-        image: validated.image && validated.image.trim() !== "" ? validated.image : null,
-      },
+    await updateUserProfile(userId, {
+      name: validated.name,
+      email: validated.email,
+      phone: validated.phone || null,
+      image: validated.image && validated.image.trim() !== "" ? validated.image : null,
     })
 
     return { success: "Perfil atualizado com sucesso!" }

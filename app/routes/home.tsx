@@ -1,7 +1,7 @@
 import type { Route } from "./+types/home";
 import { requireAuth } from "~/lib/auth.server";
 import { useLoaderData } from "react-router";
-import prisma from "prisma/prisma";
+import { getUserById } from "~/services/users.server";
 import type { RouteHandle } from "~/types/route";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 
@@ -19,17 +19,10 @@ export function meta({}: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const userId = await requireAuth(request);
   
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  });
-  
+  const user = await getUserById(userId)
+
   if (!user) {
-    throw new Error("Usuário não encontrado");
+    throw new Response("Usuário não encontrado", { status: 404 })
   }
   
   return { user };
