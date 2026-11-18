@@ -8,6 +8,9 @@ const createBikeSchema = z.object({
   model: z.string().min(1, "Modelo é obrigatório"),
   brand: z.string().optional(),
   color: z.string().optional(),
+  type: z.string().optional(),
+  currentOdometerKm: z.number().min(0).optional().nullable(),
+  currentHours: z.number().min(0).optional().nullable(),
   frameNumber: z.string().optional(),
   characteristics: z.string().optional(),
 })

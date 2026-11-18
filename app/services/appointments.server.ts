@@ -1,103 +1,476 @@
-import prisma from "../../prisma/prisma"
+/**
+ * appointments.server.ts
+ *
+ * Lógica de negócio para agendamentos e atendimentos:
+ * - Múltiplos itens (serviços padrão e avulsos) com cálculo do total no servidor
+ * - Controle de telemetria da bike (odômetro e horas)
+ * - Controle de status de pagamento (Pendente, Parcial, Pago)
+ * - Vínculo com atendimentos anteriores (continuação ou garantia)
+ * - Sincronização automática de lembretes de revisão
+ */
 
-type AppointmentStatus = "PENDENTE" | "CONCLUIDO" | "CANCELADO"
+import prisma from "../../prisma/prisma";
+import { syncRemindersForAppointment } from "./reminders.server";
 
+export type AppointmentStatus = "PENDENTE" | "CONCLUIDO" | "CANCELADO";
+export type PaymentStatus = "PENDENTE" | "PARCIAL" | "PAGO";
+export type PaymentMethod = "PIX" | "DINHEIRO" | "DEBITO" | "CREDITO";
+export type AppointmentLinkType = "CONTINUACAO" | "GARANTIA";
+
+export interface AppointmentItemInput {
+  id?: number;
+  serviceTemplateId?: number | null;
+  description: string;
+  laborCost: number;
+  partsDescription?: string | null;
+  partsCost: number;
+}
+
+export interface CreateAppointmentInput {
+  clientId: number;
+  bikeId: number;
+  title: string;
+  description?: string | null;
+  serviceDate: string | Date;
+  status?: AppointmentStatus;
+
+  // Telemetria
+  odometerKm?: number | null;
+  usageHours?: number | null;
+
+  // Pagamento
+  paymentStatus?: PaymentStatus;
+  amountPaid?: number;
+  paymentMethod?: PaymentMethod | null;
+  paidAt?: string | Date | null;
+
+  // Vínculo
+  parentAppointmentId?: number | null;
+  linkType?: AppointmentLinkType | null;
+
+  // Itens
+  items: AppointmentItemInput[];
+}
+
+export interface UpdateAppointmentInput {
+  title?: string;
+  description?: string | null;
+  serviceDate?: string | Date;
+  status?: AppointmentStatus;
+  bikeId?: number;
+
+  // Telemetria
+  odometerKm?: number | null;
+  usageHours?: number | null;
+
+  // Pagamento
+  paymentStatus?: PaymentStatus;
+  amountPaid?: number;
+  paymentMethod?: PaymentMethod | null;
+  paidAt?: string | Date | null;
+
+  // Vínculo
+  parentAppointmentId?: number | null;
+  linkType?: AppointmentLinkType | null;
+
+  // Itens
+  items?: AppointmentItemInput[];
+}
+
+/**
+ * Lista atendimentos da oficina com filtros.
+ */
 export async function listAppointments(
   userId: number,
-  filters: { clientId?: number; status?: AppointmentStatus } = {}
+  filters: {
+    clientId?: number;
+    bikeId?: number;
+    status?: AppointmentStatus;
+    paymentStatus?: PaymentStatus;
+  } = {}
 ) {
   return prisma.appointment.findMany({
     where: {
       userId,
       ...(filters.clientId && { clientId: filters.clientId }),
+      ...(filters.bikeId && { bikeId: filters.bikeId }),
       ...(filters.status && { status: filters.status }),
+      ...(filters.paymentStatus && { paymentStatus: filters.paymentStatus }),
     },
     include: {
-      client: { select: { id: true, fullName: true } },
-      bike: { select: { id: true, model: true, brand: true } },
+      client: { select: { id: true, fullName: true, phone: true } },
+      bike: { select: { id: true, model: true, brand: true, type: true } },
+      items: true,
+      parent: { select: { id: true, title: true, serviceDate: true } },
     },
     orderBy: { serviceDate: "desc" },
-  })
+  });
 }
 
+/**
+ * Retorna dados completos de um atendimento, incluindo itens, cadeia e lembretes gerados.
+ */
 export async function getAppointmentById(id: number, userId: number) {
   return prisma.appointment.findFirst({
     where: { id, userId },
     include: {
       client: {
-        include: { bikes: { select: { id: true, model: true, brand: true } } },
+        include: {
+          bikes: {
+            select: {
+              id: true,
+              model: true,
+              brand: true,
+              currentOdometerKm: true,
+              currentHours: true,
+            },
+          },
+        },
       },
       bike: true,
-      serviceDetails: true,
+      items: {
+        include: {
+          serviceTemplate: true,
+          reminder: true,
+        },
+      },
+      parent: {
+        select: {
+          id: true,
+          title: true,
+          serviceDate: true,
+          status: true,
+          totalCost: true,
+          linkType: true,
+        },
+      },
+      children: {
+        select: {
+          id: true,
+          title: true,
+          serviceDate: true,
+          status: true,
+          totalCost: true,
+          linkType: true,
+        },
+        orderBy: { serviceDate: "asc" },
+      },
     },
-  })
+  });
 }
 
+/**
+ * Lista atendimentos anteriores da mesma bike para popular o select de "Continuação de".
+ */
+export async function listPreviousAppointmentsForBike(
+  bikeId: number,
+  userId: number,
+  excludeAppointmentId?: number
+) {
+  return prisma.appointment.findMany({
+    where: {
+      bikeId,
+      userId,
+      ...(excludeAppointmentId ? { NOT: { id: excludeAppointmentId } } : {}),
+    },
+    select: {
+      id: true,
+      title: true,
+      serviceDate: true,
+      totalCost: true,
+    },
+    orderBy: { serviceDate: "desc" },
+  });
+}
+
+/**
+ * Cria um novo atendimento com seus itens e lembretes em transação atômica.
+ */
 export async function createAppointment(
   userId: number,
-  data: {
-    clientId: number
-    bikeId: number
-    title: string
-    description?: string | null
-    serviceDate: string
-    status: AppointmentStatus
-    totalCost?: number | null
-  }
+  data: CreateAppointmentInput
 ) {
+  // 1. Valida cliente e bike pertencentes à oficina
   const client = await prisma.client.findFirst({
     where: { id: data.clientId, userId },
-  })
-  if (!client) return null
+  });
+  if (!client) throw new Error("Cliente não encontrado.");
 
   const bike = await prisma.bike.findFirst({
     where: { id: data.bikeId, userId },
-  })
-  if (!bike) return null
+  });
+  if (!bike) throw new Error("Bike não encontrada.");
 
-  return prisma.appointment.create({
-    data: {
-      userId,
-      clientId: data.clientId,
-      bikeId: data.bikeId,
-      title: data.title,
-      description: data.description || null,
-      serviceDate: new Date(data.serviceDate),
-      status: data.status,
-      totalCost: data.totalCost ?? null,
-    },
-  })
+  // 2. Valida vínculo com atendimento pai (mesma bike e oficina)
+  if (data.parentAppointmentId) {
+    const parent = await prisma.appointment.findFirst({
+      where: {
+        id: data.parentAppointmentId,
+        bikeId: data.bikeId,
+        userId,
+      },
+    });
+    if (!parent) {
+      throw new Error(
+        "O atendimento de origem deve pertencer à mesma bike e oficina."
+      );
+    }
+  }
+
+  // 3. Calcula total do atendimento no servidor
+  const items = data.items && data.items.length > 0 ? data.items : [];
+  const totalCost = items.reduce(
+    (sum, item) => sum + (Number(item.laborCost) || 0) + (Number(item.partsCost) || 0),
+    0
+  );
+
+  const serviceDate = new Date(data.serviceDate);
+
+  // Determina status de pagamento se não for explicitado
+  let paymentStatus: PaymentStatus = data.paymentStatus ?? "PENDENTE";
+  const amountPaid = Number(data.amountPaid) || 0;
+  if (!data.paymentStatus) {
+    if (amountPaid >= totalCost && totalCost > 0) {
+      paymentStatus = "PAGO";
+    } else if (amountPaid > 0) {
+      paymentStatus = "PARCIAL";
+    }
+  }
+
+  // 4. Executa criação em transação
+  return prisma.$transaction(async (tx) => {
+    // Cria o atendimento
+    const appointment = await tx.appointment.create({
+      data: {
+        userId,
+        clientId: data.clientId,
+        bikeId: data.bikeId,
+        title: data.title.trim(),
+        description: data.description || null,
+        serviceDate,
+        status: data.status ?? "CONCLUIDO",
+        totalCost,
+        odometerKm: data.odometerKm ?? null,
+        usageHours: data.usageHours ?? null,
+        paymentStatus,
+        amountPaid,
+        paymentMethod: data.paymentMethod || null,
+        paidAt: data.paidAt ? new Date(data.paidAt) : paymentStatus === "PAGO" ? new Date() : null,
+        parentAppointmentId: data.parentAppointmentId || null,
+        linkType: data.parentAppointmentId ? data.linkType || "CONTINUACAO" : null,
+      },
+    });
+
+    // Cria os itens
+    const createdItems: Array<{ id: number; serviceTemplateId?: number | null }> = [];
+    for (const item of items) {
+      const created = await tx.appointmentItem.create({
+        data: {
+          appointmentId: appointment.id,
+          serviceTemplateId: item.serviceTemplateId || null,
+          description: item.description.trim(),
+          laborCost: Number(item.laborCost) || 0,
+          partsDescription: item.partsDescription?.trim() || null,
+          partsCost: Number(item.partsCost) || 0,
+        },
+      });
+      createdItems.push(created);
+    }
+
+    // Atualiza odômetro e horas na Bike se o valor for superior
+    const bikeUpdate: { currentOdometerKm?: number; currentHours?: number } = {};
+    if (
+      data.odometerKm != null &&
+      (bike.currentOdometerKm == null || data.odometerKm > bike.currentOdometerKm)
+    ) {
+      bikeUpdate.currentOdometerKm = data.odometerKm;
+    }
+    if (
+      data.usageHours != null &&
+      (bike.currentHours == null || data.usageHours > bike.currentHours)
+    ) {
+      bikeUpdate.currentHours = data.usageHours;
+    }
+    if (Object.keys(bikeUpdate).length > 0) {
+      await tx.bike.update({
+        where: { id: bike.id },
+        data: bikeUpdate,
+      });
+    }
+
+    // Sincroniza os lembretes de revisão
+    await syncRemindersForAppointment(tx, appointment, createdItems);
+
+    return appointment;
+  });
 }
 
+/**
+ * Atualiza um atendimento existente, seus itens e lembretes em transação.
+ */
 export async function updateAppointment(
   id: number,
   userId: number,
-  data: {
-    title?: string
-    description?: string | null
-    serviceDate?: string
-    status?: AppointmentStatus
-    totalCost?: number | null
-    bikeId?: number
-  }
+  data: UpdateAppointmentInput
 ) {
-  const exists = await prisma.appointment.findFirst({ where: { id, userId } })
-  if (!exists) return null
+  const existing = await prisma.appointment.findFirst({
+    where: { id, userId },
+    include: { items: true },
+  });
+  if (!existing) return null;
 
-  const { serviceDate, ...rest } = data
+  const targetBikeId = data.bikeId ?? existing.bikeId;
+
+  // Valida vínculo pai se alterado
+  if (data.parentAppointmentId) {
+    const parent = await prisma.appointment.findFirst({
+      where: {
+        id: data.parentAppointmentId,
+        bikeId: targetBikeId,
+        userId,
+        NOT: { id },
+      },
+    });
+    if (!parent) {
+      throw new Error("Atendimento de origem inválido para esta bike.");
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    let totalCost = existing.totalCost;
+
+    let createdItems: Array<{ id: number; serviceTemplateId?: number | null }> = [];
+
+    // Se novos itens foram fornecidos, substitui os itens antigos
+    if (data.items) {
+      totalCost = data.items.reduce(
+        (sum, item) => sum + (Number(item.laborCost) || 0) + (Number(item.partsCost) || 0),
+        0
+      );
+
+      // Remove itens antigos (onDelete: Cascade remove lembretes antigos do item)
+      await tx.appointmentItem.deleteMany({
+        where: { appointmentId: id },
+      });
+
+      // Cria novos itens
+      for (const item of data.items) {
+        const created = await tx.appointmentItem.create({
+          data: {
+            appointmentId: id,
+            serviceTemplateId: item.serviceTemplateId || null,
+            description: item.description.trim(),
+            laborCost: Number(item.laborCost) || 0,
+            partsDescription: item.partsDescription?.trim() || null,
+            partsCost: Number(item.partsCost) || 0,
+          },
+        });
+        createdItems.push(created);
+      }
+    } else {
+      createdItems = existing.items;
+    }
+
+    const serviceDate = data.serviceDate
+      ? new Date(data.serviceDate)
+      : existing.serviceDate;
+
+    // Atualiza atendimento
+    const updated = await tx.appointment.update({
+      where: { id },
+      data: {
+        ...(data.title && { title: data.title.trim() }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.serviceDate && { serviceDate }),
+        ...(data.status && { status: data.status }),
+        ...(data.bikeId && { bikeId: data.bikeId }),
+        totalCost,
+        ...(data.odometerKm !== undefined && { odometerKm: data.odometerKm }),
+        ...(data.usageHours !== undefined && { usageHours: data.usageHours }),
+        ...(data.paymentStatus && { paymentStatus: data.paymentStatus }),
+        ...(data.amountPaid !== undefined && { amountPaid: data.amountPaid }),
+        ...(data.paymentMethod !== undefined && {
+          paymentMethod: data.paymentMethod,
+        }),
+        ...(data.paidAt !== undefined && {
+          paidAt: data.paidAt ? new Date(data.paidAt) : null,
+        }),
+        ...(data.parentAppointmentId !== undefined && {
+          parentAppointmentId: data.parentAppointmentId || null,
+        }),
+        ...(data.linkType !== undefined && {
+          linkType: data.parentAppointmentId ? data.linkType || "CONTINUACAO" : null,
+        }),
+      },
+    });
+
+    // Atualiza bike
+    if (data.odometerKm != null || data.usageHours != null) {
+      const bike = await tx.bike.findUnique({ where: { id: targetBikeId } });
+      if (bike) {
+        const bikeUpdate: { currentOdometerKm?: number; currentHours?: number } = {};
+        if (
+          data.odometerKm != null &&
+          (bike.currentOdometerKm == null || data.odometerKm > bike.currentOdometerKm)
+        ) {
+          bikeUpdate.currentOdometerKm = data.odometerKm;
+        }
+        if (
+          data.usageHours != null &&
+          (bike.currentHours == null || data.usageHours > bike.currentHours)
+        ) {
+          bikeUpdate.currentHours = data.usageHours;
+        }
+        if (Object.keys(bikeUpdate).length > 0) {
+          await tx.bike.update({ where: { id: targetBikeId }, data: bikeUpdate });
+        }
+      }
+    }
+
+    // Sincroniza lembretes
+    await syncRemindersForAppointment(tx, updated, createdItems);
+
+    return updated;
+  });
+}
+
+/**
+ * Marca um atendimento como pago de forma rápida.
+ */
+export async function markAsPaid(
+  id: number,
+  userId: number,
+  options: {
+    method?: PaymentMethod;
+    amount?: number;
+  } = {}
+) {
+  const appointment = await prisma.appointment.findFirst({
+    where: { id, userId },
+  });
+  if (!appointment) return null;
+
+  const amountPaid = options.amount ?? appointment.totalCost ?? 0;
+  const paymentMethod = options.method ?? appointment.paymentMethod ?? "PIX";
+
   return prisma.appointment.update({
     where: { id },
     data: {
-      ...rest,
-      ...(serviceDate && { serviceDate: new Date(serviceDate) }),
+      paymentStatus: "PAGO",
+      amountPaid,
+      paymentMethod,
+      paidAt: new Date(),
     },
-  })
+  });
 }
 
+/**
+ * Exclui um atendimento e seus itens / lembretes vinculados.
+ */
 export async function deleteAppointment(id: number, userId: number) {
-  const exists = await prisma.appointment.findFirst({ where: { id, userId } })
-  if (!exists) return false
-  await prisma.serviceDetail.deleteMany({ where: { appointmentId: id } })
-  await prisma.appointment.delete({ where: { id } })
-  return true
+  const exists = await prisma.appointment.findFirst({ where: { id, userId } });
+  if (!exists) return false;
+
+  await prisma.appointment.delete({ where: { id } });
+  return true;
 }

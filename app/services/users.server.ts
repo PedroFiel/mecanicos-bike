@@ -9,7 +9,31 @@ export async function getUserById(id: number) {
       email: true,
       phone: true,
       image: true,
+      shopName: true,
+      whatsappTemplate: true,
     },
+  })
+}
+
+export async function getShopSettings(userId: number) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      shopName: true,
+      whatsappTemplate: true,
+    },
+  })
+}
+
+export async function updateShopSettings(
+  userId: number,
+  data: { shopName?: string | null; whatsappTemplate?: string | null }
+) {
+  return prisma.user.update({
+    where: { id: userId },
+    data,
   })
 }
 

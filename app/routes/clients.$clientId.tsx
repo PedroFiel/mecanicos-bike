@@ -34,6 +34,7 @@ import {
   formatDate,
   formatCurrency,
   getStatusColor,
+  getPaymentStatusBadge,
 } from "~/features/appointments/types"
 
 export const handle: RouteHandle = {
@@ -328,39 +329,48 @@ export default function Page() {
                         <TableHead>Título</TableHead>
                         <TableHead>Bike</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Pagamento</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {client.appointments.map((appointment) => (
-                        <TableRow key={appointment.id}>
-                          <TableCell className="whitespace-nowrap">
-                            {formatDate(appointment.serviceDate)}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {appointment.title}
-                          </TableCell>
-                          <TableCell>{appointment.bike.model}</TableCell>
-                          <TableCell>
-                            <Badge variant={getStatusColor(appointment.status)}>
-                              {formatStatus(appointment.status)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {appointment.totalCost
-                              ? formatCurrency(appointment.totalCost)
-                              : "—"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" asChild>
-                              <NavLink to={`/appointments/${appointment.id}`}>
-                                Ver Detalhes
-                              </NavLink>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {client.appointments.map((appointment) => {
+                        const payBadge = getPaymentStatusBadge(appointment.paymentStatus)
+                        return (
+                          <TableRow key={appointment.id}>
+                            <TableCell className="whitespace-nowrap">
+                              {formatDate(appointment.serviceDate)}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {appointment.title}
+                            </TableCell>
+                            <TableCell>{appointment.bike.model}</TableCell>
+                            <TableCell>
+                              <Badge variant={getStatusColor(appointment.status)}>
+                                {formatStatus(appointment.status)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={payBadge.variant}>
+                                {payBadge.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {appointment.totalCost
+                                ? formatCurrency(appointment.totalCost)
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" asChild>
+                                <NavLink to={`/appointments/${appointment.id}`}>
+                                  Ver Detalhes
+                                </NavLink>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>

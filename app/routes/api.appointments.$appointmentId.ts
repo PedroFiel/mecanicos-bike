@@ -3,6 +3,14 @@ import { z } from "zod"
 import { getUserFromRequest } from "~/lib/jwt.server"
 import { getAppointmentById, updateAppointment, deleteAppointment } from "~/services/appointments.server"
 
+const appointmentItemInputSchema = z.object({
+  serviceTemplateId: z.number().int().positive().optional().nullable(),
+  description: z.string().min(1, "Descrição do item é obrigatória"),
+  laborCost: z.number().nonnegative().default(0),
+  partsDescription: z.string().optional().nullable(),
+  partsCost: z.number().nonnegative().default(0),
+})
+
 const updateAppointmentSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional().nullable(),
@@ -10,6 +18,15 @@ const updateAppointmentSchema = z.object({
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
   totalCost: z.number().nonnegative().optional().nullable(),
   bikeId: z.number().int().positive().optional(),
+  odometerKm: z.number().int().nonnegative().optional().nullable(),
+  usageHours: z.number().int().nonnegative().optional().nullable(),
+  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO", "CANCELADO"]).optional(),
+  amountPaid: z.number().nonnegative().optional().nullable(),
+  paymentMethod: z.enum(["PIX", "DINHEIRO", "CARTAO_CREDITO", "CARTAO_DEBITO", "OUTRO"]).optional().nullable(),
+  paidAt: z.string().optional().nullable(),
+  parentAppointmentId: z.number().int().positive().optional().nullable(),
+  linkType: z.enum(["REVISAO_PROGRAMADA", "RETORNO_GARANTIA", "RETRABALHO", "AVULSO"]).optional().nullable(),
+  items: z.array(appointmentItemInputSchema).optional(),
 })
 
 // GET /api/appointments/:appointmentId — retorna um atendimento com todos os detalhes

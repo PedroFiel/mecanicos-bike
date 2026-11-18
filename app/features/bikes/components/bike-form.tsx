@@ -16,6 +16,7 @@ import {
 import { Input } from "~/components/ui/input"
 import { NavLink, useNavigation, Form } from "react-router"
 import type { BikeFormData } from "~/features/bikes/types"
+import { BIKE_TYPES } from "~/features/bikes/types"
 import { Spinner } from "~/components/ui/spinner"
 
 interface BikeFormProps extends React.ComponentProps<"div"> {
@@ -110,6 +111,68 @@ export function BikeForm({
                   {errors?.color && (
                     <FieldDescription className="text-red-500">
                       {errors.color}
+                    </FieldDescription>
+                  )}
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="type">Tipo da Bike</FieldLabel>
+                  <select
+                    id="type"
+                    name="type"
+                    defaultValue={defaultValues?.type ?? ""}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  >
+                    <option value="">Selecione o tipo...</option>
+                    {BIKE_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  {errors?.type && (
+                    <FieldDescription className="text-red-500">
+                      {errors.type}
+                    </FieldDescription>
+                  )}
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="currentOdometerKm">
+                    Odômetro Atual (Km)
+                  </FieldLabel>
+                  <Input
+                    id="currentOdometerKm"
+                    name="currentOdometerKm"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="Ex: 1500"
+                    defaultValue={defaultValues?.currentOdometerKm ?? undefined}
+                  />
+                  {errors?.currentOdometerKm && (
+                    <FieldDescription className="text-red-500">
+                      {errors.currentOdometerKm}
+                    </FieldDescription>
+                  )}
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="currentHours">
+                    Horímetro Atual (Horas de uso)
+                  </FieldLabel>
+                  <Input
+                    id="currentHours"
+                    name="currentHours"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="Ex: 50"
+                    defaultValue={defaultValues?.currentHours ?? undefined}
+                  />
+                  {errors?.currentHours && (
+                    <FieldDescription className="text-red-500">
+                      {errors.currentHours}
                     </FieldDescription>
                   )}
                 </Field>

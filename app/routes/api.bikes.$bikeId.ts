@@ -7,6 +7,9 @@ const updateBikeSchema = z.object({
   model: z.string().min(1).optional(),
   brand: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
+  type: z.string().optional().nullable(),
+  currentOdometerKm: z.number().min(0).optional().nullable(),
+  currentHours: z.number().min(0).optional().nullable(),
   frameNumber: z.string().optional().nullable(),
   characteristics: z.string().optional().nullable(),
 })

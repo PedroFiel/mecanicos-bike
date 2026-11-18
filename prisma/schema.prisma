@@ -20,18 +20,58 @@ model User {
   image     String?
   createdAt DateTime  @default(now())
 
+  // Campos de segurança
+  tokenVersion        Int       @default(0)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  isDemo              Boolean   @default(false)
+
+  // Configurações da oficina
+  shopName         String?
+  whatsappTemplate String?
+
   // Relações
-  clients   Client[]
-  bikes     Bike[]
-  appointments Appointment[]
+  clients          Client[]
+  bikes            Bike[]
+  appointments     Appointment[]
+  authTokens       AuthToken[]
+  securityEvents   SecurityEvent[]
+  serviceTemplates ServiceTemplate[]
+  reminders        MaintenanceReminder[]
   @@map("users")
+}
+
+model AuthToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  type      String    // "2fa_code" | "reset_password" | "trusted_device"
+  tokenHash String    // hash SHA-256 do token real
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("auth_tokens")
+}
+
+model SecurityEvent {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  type      String   // "login_success" | "login_failed" | "login_blocked" | "password_changed" | "2fa_sent" | "2fa_failed" | "password_reset_requested" | "password_reset_used"
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@map("security_events")
 }
 
 model Client {
   id          Int       @id @default(autoincrement())
   userId      Int
   fullName    String
-  cpf         String?   @unique
+  cpf         String?   // Único por oficina — ver @@unique abaixo
   email       String?
   birthDate   DateTime?
   phone       String?
@@ -43,25 +83,55 @@ model Client {
   user        User      @relation(fields: [userId], references: [id])
   bikes       Bike[]
   appointments Appointment[]
+
+  // CPF único por oficina: duas oficinas diferentes podem atender o mesmo cliente
+  @@unique([userId, cpf])
   @@map("clients")
 }
 
 model Bike {
-  id             Int       @id @default(autoincrement())
-  clientId       Int
-  userId         Int
-  model          String
-  brand          String?
-  color          String?
-  frameNumber    String?
+  id              Int       @id @default(autoincrement())
+  clientId        Int
+  userId          Int
+  model           String
+  brand           String?
+  color           String?
+  frameNumber     String?
   characteristics String?
-  createdAt      DateTime  @default(now())
+  type            String?   // MTB, Speed, Urbana, E-bike, Outro
+  currentOdometerKm Float?  // Odômetro atual da bike em km
+  currentHours    Float?    // Horímetro atual da bike em horas de uso
+  createdAt       DateTime  @default(now())
 
   // Relações
   client         Client    @relation(fields: [clientId], references: [id])
   user           User      @relation(fields: [userId], references: [id])
   appointments   Appointment[]
+  reminders      MaintenanceReminder[]
   @@map("bikes")
+}
+
+model ServiceTemplate {
+  id                Int       @id @default(autoincrement())
+  userId            Int
+  key               String?   // ex: "revisao-basica" para identificar padrões
+  name              String
+  category          String    // Revisão, Transmissão, Freios, Suspensão, Rodas, Outro
+  defaultLaborCost  Float
+  estimatedMinutes  Int?
+  intervalMonths    Int?
+  intervalKm        Float?
+  intervalHours     Float?
+  active            Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+
+  // Relações
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     AppointmentItem[]
+  reminders MaintenanceReminder[]
+
+  @@index([userId])
+  @@map("service_templates")
 }
 
 model Appointment {
@@ -73,29 +143,100 @@ model Appointment {
   description  String?
   serviceDate  DateTime  @default(now())
   status       AppointmentStatus @default(CONCLUIDO)
-  totalCost    Float?
+  totalCost           Float?
+
+  // Campos de controle de odômetro e horas
+  odometerKm          Float?
+  usageHours          Float?
+
+  // Controle de pagamento
+  paymentStatus       PaymentStatus        @default(PENDENTE)
+  amountPaid          Float                @default(0)
+  paymentMethod       PaymentMethod?
+  paidAt              DateTime?
+
+  // Vínculo entre atendimentos (retorno / garantia / continuação)
+  parentAppointmentId Int?
+  linkType            AppointmentLinkType?
 
   // Relações
-  client       Client    @relation(fields: [clientId], references: [id])
-  bike         Bike      @relation(fields: [bikeId], references: [id])
-  user         User      @relation(fields: [userId], references: [id])
-  serviceDetails ServiceDetail[]
+  client              Client               @relation(fields: [clientId], references: [id])
+  bike                Bike                 @relation(fields: [bikeId], references: [id])
+  user                User                 @relation(fields: [userId], references: [id])
+  items               AppointmentItem[]
+  parent              Appointment?         @relation("AppointmentChain", fields: [parentAppointmentId], references: [id])
+  children            Appointment[]        @relation("AppointmentChain")
   @@map("appointments")
 }
 
-model ServiceDetail {
-  id             Int       @id @default(autoincrement())
-  appointmentId  Int
-  partReplaced   String?
-  workDone       String?
-  cost           Float? 
+model AppointmentItem {
+  id                Int                  @id @default(autoincrement())
+  appointmentId     Int
+  serviceTemplateId Int?
+  description       String
+  laborCost         Float                @default(0)
+  partsDescription  String?
+  partsCost         Float                @default(0)
 
-  appointment    Appointment @relation(fields: [appointmentId], references: [id])
-  @@map("service_details")
+  // Relações
+  appointment       Appointment          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceTemplate   ServiceTemplate?     @relation(fields: [serviceTemplateId], references: [id])
+  reminder          MaintenanceReminder?
+
+  @@map("appointment_items")
+}
+
+model MaintenanceReminder {
+  id                Int             @id @default(autoincrement())
+  userId            Int
+  bikeId            Int
+  appointmentItemId Int             @unique
+  serviceTemplateId Int
+  dueDate           DateTime?
+  dueKm             Float?
+  dueHours          Float?
+  status            ReminderStatus  @default(ABERTO)
+  contactedAt       DateTime?
+  createdAt         DateTime        @default(now())
+
+  // Relações
+  user              User            @relation(fields: [userId], references: [id])
+  bike              Bike            @relation(fields: [bikeId], references: [id], onDelete: Cascade)
+  appointmentItem   AppointmentItem @relation(fields: [appointmentItemId], references: [id], onDelete: Cascade)
+  serviceTemplate   ServiceTemplate @relation(fields: [serviceTemplateId], references: [id])
+
+  @@index([userId, status, dueDate])
+  @@map("maintenance_reminders")
 }
 
 enum AppointmentStatus {
   PENDENTE
   CONCLUIDO
   CANCELADO
+}
+
+enum PaymentStatus {
+  PENDENTE
+  PARCIAL
+  PAGO
+}
+
+enum PaymentMethod {
+  PIX
+  DINHEIRO
+  DEBITO
+  CREDITO
+}
+
+enum AppointmentLinkType {
+  CONTINUACAO
+  GARANTIA
+}
+
+enum ReminderStatus {
+  ABERTO
+  CONTATADO
+  AGENDADO
+  CONCLUIDO
+  DISPENSADO
 }
