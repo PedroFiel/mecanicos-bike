@@ -7,3 +7,7 @@
 /build/
 
 /app/generated/
+
+# Bancos locais
+*.sqlite
+*.db
