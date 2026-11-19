@@ -99,8 +99,8 @@ export async function action({ request }: ActionFunctionArgs) {
       subject: "Sua senha foi alterada — Mecânicos Bike",
       html: passwordChangedEmail(user.name),
     })
-  } catch {
-    console.error("Falha ao enviar aviso de alteração de senha.")
+  } catch (error) {
+    console.error("Falha ao enviar aviso de alteração de senha:", error instanceof Error ? error.message : error)
   }
 
   return redirect("/login?reset=success")

@@ -42,25 +42,25 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),
-}).superRefine((config, ctx) => {
-  if (config.EMAIL_PROVIDER !== "brevo") return;
-
-  if (!config.BREVO_API_KEY) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["BREVO_API_KEY"],
-      message: "Preencha a chave de API para usar o Brevo.",
-    });
-  }
-
-  if (!z.email().safeParse(config.BREVO_SENDER_EMAIL).success) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["BREVO_SENDER_EMAIL"],
-      message: "Informe o endereço de remetente verificado no Brevo.",
-    });
-  }
 });
+
+/**
+ * Problemas na configuração de e-mail não derrubam o app (o resto do sistema funciona);
+ * o envio falha com esta mensagem e ela aparece no log ao iniciar.
+ */
+function checkEmailConfig(config: z.infer<typeof envSchema>): string | null {
+  if (config.EMAIL_PROVIDER === "brevo") {
+    const missing = [
+      !config.BREVO_API_KEY && "BREVO_API_KEY",
+      !z.email().safeParse(config.BREVO_SENDER_EMAIL).success && "BREVO_SENDER_EMAIL (e-mail verificado no Brevo)",
+    ].filter(Boolean);
+    return missing.length ? `Configuração do Brevo incompleta: ${missing.join(", ")}.` : null;
+  }
+  if (config.NODE_ENV === "production" && !config.RESEND_API_KEY) {
+    return "RESEND_API_KEY não configurada (ou use EMAIL_PROVIDER=brevo).";
+  }
+  return null;
+}
 
 function validateEnv() {
   const result = envSchema.safeParse(process.env);
@@ -80,5 +80,11 @@ function validateEnv() {
 }
 
 export const env = validateEnv();
+
+export const emailConfigError = checkEmailConfig(env);
+if (emailConfigError) console.error(`[e-mail] ${emailConfigError} Os e-mails não serão enviados.`);
+if (env.NODE_ENV === "production" && !env.APP_URL) {
+  console.error("[e-mail] APP_URL não configurada: os links de redefinição de senha apontarão para localhost.");
+}
 
 export type Env = typeof env;
