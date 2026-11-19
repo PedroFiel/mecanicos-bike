@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import prisma from "prisma/prisma"
 import {
+  data,
   redirect,
   useActionData,
   Form,
@@ -10,7 +11,8 @@ import {
 } from "react-router"
 import { serialize } from "cookie"
 import {
-  getChallengeUserId,
+  getLoginChallenge,
+  createChallengeCookie,
   createUserSession,
   clearChallengeCookie,
 } from "~/lib/auth.server"
@@ -21,23 +23,25 @@ import { env } from "~/lib/env.server"
 // ─── Loader ─────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const userId = getChallengeUserId(request)
-
-  // Sem cookie de desafio → voltar para login
-  if (!userId) {
-    throw redirect("/login")
-  }
-
-  return { userId }
+  if (!getLoginChallenge(request)) throw redirect("/login")
+  return null
 }
 
 // ─── Action ──────────────────────────────────────────────────────────────────
 
 export async function action({ request }: ActionFunctionArgs) {
-  const userId = getChallengeUserId(request)
+  const challenge = getLoginChallenge(request)
+  if (!challenge) throw redirect("/login")
 
-  if (!userId) {
-    throw redirect("/login")
+  const { userId, tokenId, tokenVersion } = challenge
+  const now = new Date()
+  const activeChallenge = {
+    id: tokenId, userId, type: "2fa_code", usedAt: null,
+    expiresAt: { gt: now }, attempts: { lt: 5 }, user: { tokenVersion },
+  }
+  const authToken = await prisma.authToken.findFirst({ where: activeChallenge })
+  if (!authToken) {
+    return redirect("/login?error=expired", { headers: { "Set-Cookie": clearChallengeCookie() } })
   }
 
   const formData = await request.formData()
@@ -46,24 +50,11 @@ export async function action({ request }: ActionFunctionArgs) {
   // ── Reenviar código ──────────────────────────────────────────────────────
   if (intent === "resend") {
     // Verificar se já foi enviado nos últimos 60 segundos
-    const lastToken = await prisma.authToken.findFirst({
-      where: {
-        userId,
-        type: "2fa_code",
-        usedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: "desc" },
-    })
-
-    if (lastToken) {
-      const secondsSinceLast =
-        (Date.now() - lastToken.createdAt.getTime()) / 1000
-      if (secondsSinceLast < 60) {
-        return {
-          error: `Aguarde ${Math.ceil(60 - secondsSinceLast)} segundos antes de reenviar.`,
-          resent: false,
-        }
+    const secondsSinceLast = (now.getTime() - authToken.createdAt.getTime()) / 1000
+    if (secondsSinceLast < 60) {
+      return {
+        error: `Aguarde ${Math.ceil(60 - secondsSinceLast)} segundos antes de reenviar.`,
+        resent: false,
       }
     }
 
@@ -78,18 +69,15 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Criar novo AuthToken
-    const code = String(Math.floor(100000 + Math.random() * 900000))
+    const code = String(crypto.randomInt(100000, 1000000))
     const tokenHash = crypto.createHash("sha256").update(code).digest("hex")
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
 
-    await prisma.authToken.create({
-      data: {
-        userId,
-        type: "2fa_code",
-        tokenHash,
-        expiresAt,
-      },
+    const refreshed = await prisma.authToken.updateMany({
+      where: { ...activeChallenge, createdAt: authToken.createdAt },
+      data: { tokenHash, expiresAt, createdAt: now },
     })
+    if (!refreshed.count) return { error: "O desafio mudou. Tente novamente.", resent: false }
 
     try {
       const html = twoFactorCodeEmail(code, "Mecânicos Bike")
@@ -100,13 +88,17 @@ export async function action({ request }: ActionFunctionArgs) {
       })
     } catch (err) {
       console.error("[2FA resend] Falha ao enviar e-mail:", err)
+      return { error: "Não foi possível enviar o código.", resent: false }
     }
 
-    return { error: null, resent: true }
+    return data({ error: null, resent: true }, {
+      headers: { "Set-Cookie": createChallengeCookie(userId, tokenId, tokenVersion) },
+    })
   }
 
   // ── Verificar código ─────────────────────────────────────────────────────
-  const code = (formData.get("code") as string | null)?.trim() ?? ""
+  const input = formData.get("code")
+  const code = typeof input === "string" ? input.trim() : ""
   const trustDevice = formData.get("trust_device") === "on"
 
   if (!code || !/^\d{6}$/.test(code)) {
@@ -115,35 +107,18 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const submittedHash = crypto.createHash("sha256").update(code).digest("hex")
 
-  // Buscar AuthToken ativo
-  const authToken = await prisma.authToken.findFirst({
-    where: {
-      userId,
-      type: "2fa_code",
-      usedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: "desc" },
-  })
-
-  if (!authToken) {
-    // Token expirado ou inexistente
-    return redirect("/login?error=expired", {
-      headers: { "Set-Cookie": clearChallengeCookie() },
-    })
-  }
-
+  const unchangedChallenge = { ...activeChallenge, tokenHash: authToken.tokenHash, attempts: authToken.attempts }
   // Código errado
   if (authToken.tokenHash !== submittedHash) {
     const newAttempts = authToken.attempts + 1
 
-    if (newAttempts >= 5) {
-      // Cancelar desafio — marcar token como usado
-      await prisma.authToken.update({
-        where: { id: authToken.id },
-        data: { usedAt: new Date(), attempts: newAttempts },
-      })
+    const failed = await prisma.authToken.updateMany({
+      where: unchangedChallenge,
+      data: { attempts: newAttempts, ...(newAttempts >= 5 && { usedAt: now }) },
+    })
+    if (!failed.count) return { error: "O desafio mudou. Tente novamente.", resent: false }
 
+    if (newAttempts >= 5) {
       // Registrar falha
       await prisma.securityEvent.create({
         data: {
@@ -161,12 +136,6 @@ export async function action({ request }: ActionFunctionArgs) {
       })
     }
 
-    // Incrementar tentativas
-    await prisma.authToken.update({
-      where: { id: authToken.id },
-      data: { attempts: newAttempts },
-    })
-
     return {
       error: `Código incorreto. ${5 - newAttempts} tentativa(s) restante(s).`,
       resent: false,
@@ -176,10 +145,10 @@ export async function action({ request }: ActionFunctionArgs) {
   // ── Código correto ───────────────────────────────────────────────────────
 
   // Marcar token como usado
-  await prisma.authToken.update({
-    where: { id: authToken.id },
-    data: { usedAt: new Date() },
+  const verified = await prisma.authToken.updateMany({
+    where: unchangedChallenge, data: { usedAt: now },
   })
+  if (!verified.count) return { error: "O desafio mudou. Tente novamente.", resent: false }
 
   // Buscar dados completos do usuário para criar sessão
   const user = await prisma.user.findUnique({
@@ -187,9 +156,7 @@ export async function action({ request }: ActionFunctionArgs) {
     select: { id: true, email: true, tokenVersion: true },
   })
 
-  if (!user) {
-    throw redirect("/login")
-  }
+  if (!user || user.tokenVersion !== tokenVersion) throw redirect("/login")
 
   // Headers da resposta
   const responseHeaders = new Headers()

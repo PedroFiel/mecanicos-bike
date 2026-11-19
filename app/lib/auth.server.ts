@@ -1,5 +1,6 @@
 import { redirect } from "react-router"
 import { serialize, parse } from "cookie"
+import jwt from "jsonwebtoken"
 import { createToken, getUserFromRequest, type JWTPayload } from "./jwt.server"
 import prisma from "prisma/prisma"
 import { env } from "~/lib/env.server"
@@ -14,28 +15,9 @@ import { env } from "~/lib/env.server"
  * @throws redirect("/login") se não autenticado ou sessão revogada
  */
 export async function requireAuth(request: Request): Promise<number> {
-  const jwtPayload = getUserFromRequest(request)
-
-  if (!jwtPayload) {
-    throw redirect("/login")
-  }
-
-  // Busca o usuário no banco para validar tokenVersion
-  const user = await prisma.user.findUnique({
-    where: { id: jwtPayload.userId },
-    select: { id: true, tokenVersion: true },
-  })
-
-  if (!user) {
-    throw redirect("/login")
-  }
-
-  // Se tokenVersion diverge, a sessão foi revogada (logout em outro dispositivo, troca de senha)
-  if ((jwtPayload.tokenVersion ?? 0) !== user.tokenVersion) {
-    throw redirect("/login")
-  }
-
-  return user.id
+  const user = await getOptionalUser(request)
+  if (!user) throw redirect("/login")
+  return user.userId
 }
 
 /**
@@ -46,7 +28,10 @@ export async function requireAuth(request: Request): Promise<number> {
  * @returns Payload do JWT ou null
  */
 export async function getOptionalUser(request: Request): Promise<JWTPayload | null> {
-  return getUserFromRequest(request)
+  const payload = getUserFromRequest(request)
+  if (!payload || !Number.isSafeInteger(payload.userId)) return null
+  const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { tokenVersion: true } })
+  return user && (payload.tokenVersion ?? 0) === user.tokenVersion ? payload : null
 }
 
 /**
@@ -97,7 +82,7 @@ export async function logout(
   request: Request,
   redirectTo: string = "/login"
 ): Promise<Response> {
-  const jwtPayload = getUserFromRequest(request)
+  const jwtPayload = await getOptionalUser(request)
 
   // Incrementa tokenVersion para invalidar todas as sessões do usuário
   if (jwtPayload?.userId) {
@@ -130,8 +115,11 @@ export async function logout(
  * @param userId - ID do usuário que iniciou o login
  * @returns String serializada do Set-Cookie header
  */
-export function createChallengeCookie(userId: number): string {
-  return serialize("challenge_uid", String(userId), {
+const challengeSecret = `${env.JWT_SECRET}:login-challenge`
+
+export function createChallengeCookie(userId: number, tokenId: number, tokenVersion: number): string {
+  const challenge = jwt.sign({ userId, tokenId, tokenVersion }, challengeSecret, { expiresIn: "10m" })
+  return serialize("challenge_uid", challenge, {
     httpOnly: true,
     secure: env.NODE_ENV === "production",
     sameSite: "lax",
@@ -146,7 +134,7 @@ export function createChallengeCookie(userId: number): string {
  * @param request - Objeto Request do React Router
  * @returns userId ou null se cookie ausente/inválido
  */
-export function getChallengeUserId(request: Request): number | null {
+export function getLoginChallenge(request: Request) {
   const cookieHeader = request.headers.get("Cookie")
   if (!cookieHeader) return null
 
@@ -154,8 +142,15 @@ export function getChallengeUserId(request: Request): number | null {
   const raw = cookies["challenge_uid"]
   if (!raw) return null
 
-  const parsed = parseInt(raw, 10)
-  return isNaN(parsed) ? null : parsed
+  try {
+    const payload = jwt.verify(raw, challengeSecret, { algorithms: ["HS256"] })
+    if (typeof payload === "string") return null
+    const { userId, tokenId, tokenVersion } = payload
+    if (![userId, tokenId, tokenVersion].every(Number.isSafeInteger)) return null
+    return { userId: Number(userId), tokenId: Number(tokenId), tokenVersion: Number(tokenVersion) }
+  } catch {
+    return null
+  }
 }
 
 /**

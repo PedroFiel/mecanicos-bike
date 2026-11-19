@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { getBikeById, updateBike, deleteBike } from "~/services/bikes.server"
 
 const updateBikeSchema = z.object({
@@ -16,7 +16,7 @@ const updateBikeSchema = z.object({
 
 // GET /api/bikes/:bikeId — retorna dados completos de uma bike
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const bikeId = Number(params.bikeId)
@@ -31,7 +31,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // PUT /api/bikes/:bikeId — atualiza dados de uma bike
 // DELETE /api/bikes/:bikeId — remove uma bike
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const bikeId = Number(params.bikeId)

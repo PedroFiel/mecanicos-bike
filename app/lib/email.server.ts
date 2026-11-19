@@ -1,14 +1,4 @@
-/**
- * email.server.ts
- *
- * Módulo de envio de e-mail com suporte a Resend (produção) e console (dev).
- *
- * Em produção: defina RESEND_API_KEY no .env e EMAIL_FROM (ex: "Bike <noreply@seudominio.com>")
- * Em desenvolvimento: os e-mails são impressos no console.
- *
- * // Execute: npm install resend
- */
-
+import { Resend } from "resend";
 import { env } from "~/lib/env.server";
 
 export interface EmailParams {
@@ -17,41 +7,40 @@ export interface EmailParams {
   html: string;
 }
 
-/**
- * Envia um e-mail via Resend se RESEND_API_KEY estiver configurada,
- * caso contrário imprime no console (modo dev/fallback).
- * Usa dynamic import para não quebrar a aplicação caso o pacote `resend` ainda não esteja instalado.
- */
 export async function sendEmail({ to, subject, html }: EmailParams): Promise<void> {
-  if (env.RESEND_API_KEY) {
-    try {
-      // @ts-expect-error resend pode não estar instalado em ambiente dev
-      const { Resend } = await import("resend");
-      const resend = new Resend(env.RESEND_API_KEY);
-      const from = env.EMAIL_FROM ?? "Mecânicos Bike <noreply@mecanicosbike.com.br>";
+  if (env.EMAIL_PROVIDER === "brevo") {
+    const apiKey = env.BREVO_API_KEY;
+    const senderEmail = env.BREVO_SENDER_EMAIL;
+    if (!apiKey || !senderEmail) throw new Error("Configuração do Brevo incompleta.");
 
-      const { error } = await resend.emails.send({ from, to, subject, html });
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": apiKey,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        sender: { email: senderEmail, name: env.BREVO_SENDER_NAME || "Mecânicos Bike" },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
 
-      if (error) {
-        throw new Error(`Falha ao enviar e-mail: ${error.message}`);
-      }
-    } catch (err: any) {
-      console.error("[EMAIL] Erro no envio com Resend, imprimindo no console:", err?.message || err);
-      printEmailToConsole({ to, subject, html });
-    }
-  } else {
-    // Modo dev: imprime o e-mail no console
-    printEmailToConsole({ to, subject, html });
+    if (!response.ok) throw new Error(`Brevo recusou o envio (HTTP ${response.status}).`);
+    return;
   }
-}
 
-function printEmailToConsole({ to, subject, html }: EmailParams) {
-  console.log(
-    "\n━━━━━━━━━━━━━━━━ [EMAIL — MODO DEV] ━━━━━━━━━━━━━━━━\n" +
-      `Para:     ${to}\n` +
-      `Assunto:  ${subject}\n` +
-      `─────────────────────────────────────────────────────\n` +
-      `${html}\n` +
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-  );
+  if (env.RESEND_API_KEY) {
+    const resend = new Resend(env.RESEND_API_KEY);
+    const from = env.EMAIL_FROM ?? "Mecânicos Bike <noreply@mecanicosbike.com.br>";
+    const { error } = await resend.emails.send({ from, to, subject, html });
+    if (error) throw new Error(`Falha ao enviar e-mail: ${error.message}`);
+    return;
+  }
+
+  if (env.NODE_ENV === "production") throw new Error("RESEND_API_KEY não configurada.");
+  console.log("[EMAIL — MODO DEV]", { to, subject, html });
 }

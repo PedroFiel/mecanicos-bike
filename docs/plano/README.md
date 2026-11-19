@@ -1,9 +1,9 @@
 # Plano de evolução — Mecânicos Bike
 
-> Status: **planejamento aprovado, execução ainda não iniciada.**
+> Status: **Fases 0 a 5 implementadas no repositório. A validação e o deploy em produção dependem dos acessos e da configuração do ambiente.**
 > Data do levantamento: 17/11/2026.
 
-Este diretório documenta o escopo, as decisões e o plano de execução da próxima etapa do sistema. Nada aqui foi implementado ainda: cada fase vira uma branch e um PR próprios quando a execução começar.
+Este diretório registra o escopo e as decisões da evolução do sistema. Consulte o README principal para preparar o banco local e executar a demonstração.
 
 ## O que vamos entregar
 

@@ -5,6 +5,7 @@
  */
 
 import prisma from "../../prisma/prisma";
+import type { Prisma } from "../generated/prisma/client";
 import { DEFAULT_SERVICES, type ServiceCategory } from "~/lib/default-services";
 
 export interface CreateServiceTemplateInput {
@@ -133,7 +134,7 @@ export async function setServiceTemplateActive(
  */
 export async function seedDefaultServices(
   userId: number,
-  dbClient: any = prisma
+  dbClient: Prisma.TransactionClient = prisma
 ) {
   const data = DEFAULT_SERVICES.map((s) => ({
     userId,

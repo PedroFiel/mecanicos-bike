@@ -10,8 +10,7 @@ import {
 import type { Route } from "./+types/root";
 import "./app.css";
 import { ThemeProvider } from "next-themes";
-// Valida variáveis de ambiente na inicialização do servidor
-import "~/lib/env.server";
+import { env } from "~/lib/env.server";
 
 /**
  * Headers de segurança aplicados em todas as respostas do servidor.
@@ -31,7 +30,7 @@ export function headers() {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: blob:",
-      "connect-src 'self'",
+      env.NODE_ENV === "development" ? "connect-src 'self' ws: wss:" : "connect-src 'self'",
       "frame-ancestors 'none'",
     ].join("; "),
   };

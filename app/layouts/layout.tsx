@@ -21,7 +21,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       name: true,
       email: true,
       phone: true,
-      image: true
+      image: true,
+      isDemo: true
     }
   })
 
@@ -49,6 +50,9 @@ export default function () {
       <AppSidebar variant="inset" user={user} />
       <SidebarInset>
         <SiteHeader />
+        {user.isDemo && (
+          <p className="border-b bg-muted px-4 py-2 text-sm font-medium">Conta de demonstração</p>
+        )}
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
             {outlet}

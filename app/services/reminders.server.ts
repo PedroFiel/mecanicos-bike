@@ -36,7 +36,11 @@ export function computeDue({
   let dueDate: Date | null = null;
   if (intervalMonths && intervalMonths > 0) {
     dueDate = new Date(serviceDate);
+    const day = dueDate.getDate();
+    dueDate.setDate(1);
     dueDate.setMonth(dueDate.getMonth() + intervalMonths);
+    const endOfMonth = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0);
+    dueDate.setDate(Math.min(day, endOfMonth.getDate()));
   }
 
   let dueKm: number | null = null;
@@ -132,7 +136,7 @@ export async function syncRemindersForAppointment(
     if (!item.serviceTemplateId) continue;
 
     const template = await tx.serviceTemplate.findUnique({
-      where: { id: item.serviceTemplateId },
+      where: { id: item.serviceTemplateId, userId: appointment.userId },
     });
 
     if (!template) continue;
@@ -187,30 +191,26 @@ export async function syncRemindersForAppointment(
  */
 export async function listDueReminders(
   userId: number,
-  options: { withinDays?: number } = {}
+  options: { withinDays?: number; today?: Date } = {}
 ) {
   const withinDays = options.withinDays ?? 15;
-  const today = new Date();
-  const futureLimit = new Date();
-  futureLimit.setDate(today.getDate() + withinDays);
+  const today = options.today ?? new Date();
 
   const reminders = await prisma.maintenanceReminder.findMany({
     where: {
       userId,
       status: { in: ["ABERTO", "CONTATADO"] },
     },
-    include: {
+    select: {
+      id: true, status: true, contactedAt: true, dueDate: true, dueKm: true, dueHours: true,
       bike: {
-        include: {
-          client: true,
+        select: {
+          model: true, brand: true, currentOdometerKm: true, currentHours: true,
+          client: { select: { id: true, fullName: true, phone: true } },
         },
       },
-      serviceTemplate: true,
-      appointmentItem: {
-        include: {
-          appointment: true,
-        },
-      },
+      serviceTemplate: { select: { name: true } },
+      appointmentItem: { select: { appointment: { select: { serviceDate: true } } } },
     },
     orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
   });
@@ -230,17 +230,12 @@ export async function updateReminderStatus(
   status: "ABERTO" | "CONTATADO" | "AGENDADO" | "CONCLUIDO" | "DISPENSADO",
   contactedAt?: Date | null
 ) {
-  const reminder = await prisma.maintenanceReminder.findFirst({
-    where: { id, userId },
-  });
-
-  if (!reminder) return null;
-
-  return prisma.maintenanceReminder.update({
-    where: { id },
+  const result = await prisma.maintenanceReminder.updateMany({
+    where: { id, userId, status: { in: ["ABERTO", "CONTATADO"] } },
     data: {
       status,
       ...(status === "CONTATADO" && { contactedAt: contactedAt ?? new Date() }),
     },
   });
+  return result.count > 0;
 }

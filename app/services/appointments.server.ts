@@ -10,6 +10,7 @@
  */
 
 import prisma from "../../prisma/prisma";
+import type { Prisma } from "../generated/prisma/client";
 import { syncRemindersForAppointment } from "./reminders.server";
 
 export type AppointmentStatus = "PENDENTE" | "CONCLUIDO" | "CANCELADO";
@@ -183,38 +184,36 @@ export async function listPreviousAppointmentsForBike(
   });
 }
 
+async function ownsAppointmentTemplates(
+  db: Prisma.TransactionClient, userId: number, items: AppointmentItemInput[],
+) {
+  const ids = Array.from(new Set(items.flatMap((item) => item.serviceTemplateId ? [item.serviceTemplateId] : [])));
+  if (!ids.length) return true;
+  return await db.serviceTemplate.count({ where: { id: { in: ids }, userId } }) === ids.length;
+}
+
 /**
  * Cria um novo atendimento com seus itens e lembretes em transação atômica.
  */
 export async function createAppointment(
   userId: number,
-  data: CreateAppointmentInput
+  data: CreateAppointmentInput,
+  transaction?: Prisma.TransactionClient
 ) {
+  const db = transaction ?? prisma;
   // 1. Valida cliente e bike pertencentes à oficina
-  const client = await prisma.client.findFirst({
-    where: { id: data.clientId, userId },
+  const matchedBike = await db.bike.findFirst({
+    where: { id: data.bikeId, clientId: data.clientId, userId, client: { userId } },
   });
-  if (!client) throw new Error("Cliente não encontrado.");
-
-  const bike = await prisma.bike.findFirst({
-    where: { id: data.bikeId, userId },
-  });
-  if (!bike) throw new Error("Bike não encontrada.");
+  if (!matchedBike || !await ownsAppointmentTemplates(db, userId, data.items)) return null;
+  const bike = matchedBike;
 
   // 2. Valida vínculo com atendimento pai (mesma bike e oficina)
   if (data.parentAppointmentId) {
-    const parent = await prisma.appointment.findFirst({
-      where: {
-        id: data.parentAppointmentId,
-        bikeId: data.bikeId,
-        userId,
-      },
+    const parent = await db.appointment.findFirst({
+      where: { id: data.parentAppointmentId, bikeId: data.bikeId, userId },
     });
-    if (!parent) {
-      throw new Error(
-        "O atendimento de origem deve pertencer à mesma bike e oficina."
-      );
-    }
+    if (!parent) return null;
   }
 
   // 3. Calcula total do atendimento no servidor
@@ -237,8 +236,8 @@ export async function createAppointment(
     }
   }
 
-  // 4. Executa criação em transação
-  return prisma.$transaction(async (tx) => {
+  // Reutiliza a transação do seed quando o chamador já abriu uma.
+  async function persist(tx: Prisma.TransactionClient) {
     // Cria o atendimento
     const appointment = await tx.appointment.create({
       data: {
@@ -302,7 +301,9 @@ export async function createAppointment(
     await syncRemindersForAppointment(tx, appointment, createdItems);
 
     return appointment;
-  });
+  }
+
+  return transaction ? persist(transaction) : prisma.$transaction(persist);
 }
 
 /**
@@ -320,20 +321,22 @@ export async function updateAppointment(
   if (!existing) return null;
 
   const targetBikeId = data.bikeId ?? existing.bikeId;
+  if (data.bikeId !== undefined && !await prisma.bike.findFirst({
+    where: { id: targetBikeId, userId, clientId: existing.clientId },
+  })) return null;
+  if (data.items && !await ownsAppointmentTemplates(prisma, userId, data.items)) return null;
 
-  // Valida vínculo pai se alterado
-  if (data.parentAppointmentId) {
+  const parentId = data.parentAppointmentId === undefined ? existing.parentAppointmentId : data.parentAppointmentId;
+  if (parentId && (data.parentAppointmentId !== undefined || data.bikeId !== undefined)) {
     const parent = await prisma.appointment.findFirst({
       where: {
-        id: data.parentAppointmentId,
+        id: parentId,
         bikeId: targetBikeId,
         userId,
         NOT: { id },
       },
     });
-    if (!parent) {
-      throw new Error("Atendimento de origem inválido para esta bike.");
-    }
+    if (!parent) return null;
   }
 
   return prisma.$transaction(async (tx) => {
@@ -398,8 +401,8 @@ export async function updateAppointment(
         ...(data.parentAppointmentId !== undefined && {
           parentAppointmentId: data.parentAppointmentId || null,
         }),
-        ...(data.linkType !== undefined && {
-          linkType: data.parentAppointmentId ? data.linkType || "CONTINUACAO" : null,
+        ...((data.parentAppointmentId !== undefined || data.linkType !== undefined) && {
+          linkType: parentId ? data.linkType ?? existing.linkType ?? "CONTINUACAO" : null,
         }),
       },
     });

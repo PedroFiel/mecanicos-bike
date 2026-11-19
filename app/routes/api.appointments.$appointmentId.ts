@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { getAppointmentById, updateAppointment, deleteAppointment } from "~/services/appointments.server"
 
 const appointmentItemInputSchema = z.object({
@@ -14,24 +14,26 @@ const appointmentItemInputSchema = z.object({
 const updateAppointmentSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional().nullable(),
-  serviceDate: z.string().optional(),
+  serviceDate: z.string().refine((value) => !Number.isNaN(Date.parse(value))).optional(),
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
   totalCost: z.number().nonnegative().optional().nullable(),
   bikeId: z.number().int().positive().optional(),
   odometerKm: z.number().int().nonnegative().optional().nullable(),
   usageHours: z.number().int().nonnegative().optional().nullable(),
-  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO", "CANCELADO"]).optional(),
-  amountPaid: z.number().nonnegative().optional().nullable(),
-  paymentMethod: z.enum(["PIX", "DINHEIRO", "CARTAO_CREDITO", "CARTAO_DEBITO", "OUTRO"]).optional().nullable(),
-  paidAt: z.string().optional().nullable(),
+  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).optional(),
+  amountPaid: z.number().nonnegative().nullish().transform((amount) => amount ?? undefined),
+  paymentMethod: z.enum(["PIX", "DINHEIRO", "CREDITO", "DEBITO", "CARTAO_CREDITO", "CARTAO_DEBITO"])
+    .transform((method) => method === "CARTAO_CREDITO" ? "CREDITO" as const : method === "CARTAO_DEBITO" ? "DEBITO" as const : method).optional().nullable(),
+  paidAt: z.string().refine((value) => !Number.isNaN(Date.parse(value))).nullish(),
   parentAppointmentId: z.number().int().positive().optional().nullable(),
-  linkType: z.enum(["REVISAO_PROGRAMADA", "RETORNO_GARANTIA", "RETRABALHO", "AVULSO"]).optional().nullable(),
+  linkType: z.enum(["CONTINUACAO", "GARANTIA", "RETORNO_GARANTIA", "RETRABALHO"])
+    .transform((type) => type === "CONTINUACAO" ? type : "GARANTIA" as const).optional().nullable(),
   items: z.array(appointmentItemInputSchema).optional(),
 })
 
 // GET /api/appointments/:appointmentId — retorna um atendimento com todos os detalhes
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const appointmentId = Number(params.appointmentId)
@@ -46,7 +48,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // PUT /api/appointments/:appointmentId — atualiza um atendimento
 // DELETE /api/appointments/:appointmentId — remove um atendimento
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const appointmentId = Number(params.appointmentId)
@@ -74,7 +76,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       )
     }
 
-    const updated = await updateAppointment(appointmentId, user.userId, result.data)
+    const { totalCost, items, ...fields } = result.data
+    const updated = await updateAppointment(appointmentId, user.userId, {
+      ...fields,
+      items: items ?? (totalCost == null ? undefined : [{
+        description: "Serviço avulso", laborCost: totalCost, partsCost: 0,
+      }]),
+    })
     if (!updated) return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
 
     return Response.json(updated)

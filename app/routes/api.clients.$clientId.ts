@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { getClientById, updateClient, deleteClient } from "~/services/clients.server"
 
 const updateClientSchema = z.object({
@@ -15,7 +15,7 @@ const updateClientSchema = z.object({
 
 // GET /api/clients/:clientId — retorna dados completos de um cliente
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const clientId = Number(params.clientId)
@@ -30,7 +30,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // PUT /api/clients/:clientId — atualiza dados do cliente
 // DELETE /api/clients/:clientId — remove o cliente
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const clientId = Number(params.clientId)

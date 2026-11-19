@@ -95,7 +95,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   try {
-    await createAppointment(userId, {
+    const appointment = await createAppointment(userId, {
       clientId: validatedData.clientId,
       bikeId: validatedData.bikeId,
       title: validatedData.title,
@@ -112,6 +112,7 @@ export async function action({ request }: Route.ActionArgs) {
       items,
     });
 
+    if (!appointment) return { errors: { general: "Cliente, bike ou serviço indisponível." } };
     return redirect(`/clients/${clientIdParam}?tab=atendimentos`);
   } catch (err: any) {
     return { errors: { general: err.message || "Erro ao criar atendimento" } };

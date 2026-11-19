@@ -34,18 +34,20 @@ interface MetricsProps {
     retention: {
       customerRetentionRate: number;
       reworkRate: number;
+      retentionChange: number;
+      reworkChange: number;
     };
   };
-  periodLabel: string;
+
 }
 
 function formatCurrency(val: number) {
   return val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
+export function DashboardMetrics({ metrics }: MetricsProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {/* 1. Faturamento */}
       <Card className="relative overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -75,7 +77,7 @@ export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
                 {metrics.revenue.variation}%
               </Badge>
             ) : null}
-            <span>vs. período anterior</span>
+            <span>{metrics.revenue.variation === null ? "Sem base de comparação" : "vs. período anterior"}</span>
           </div>
         </CardContent>
       </Card>
@@ -109,7 +111,7 @@ export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
                 {metrics.ticket.variation}%
               </Badge>
             ) : null}
-            <span>por atendimento</span>
+            <span>{metrics.ticket.variation === null ? "Sem base de comparação" : "vs. período anterior"}</span>
           </div>
         </CardContent>
       </Card>
@@ -129,7 +131,7 @@ export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
             {formatCurrency(metrics.receivable.value)}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {metrics.receivable.count} pagamento(s) pendente(s)
+            {metrics.receivable.count} com saldo na oficina
           </p>
         </CardContent>
       </Card>
@@ -149,7 +151,7 @@ export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
             {metrics.openAppointments.value}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Orçamentos ou serviços em curso
+            Total atual da oficina
           </p>
         </CardContent>
       </Card>
@@ -196,6 +198,10 @@ export function DashboardMetrics({ metrics, periodLabel }: MetricsProps) {
             <strong className={metrics.retention.reworkRate > 5 ? "text-amber-500" : "text-foreground"}>
               {metrics.retention.reworkRate}%
             </strong>
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {metrics.retention.retentionChange > 0 ? "+" : ""}{metrics.retention.retentionChange} p.p. em retorno e{" "}
+            {metrics.retention.reworkChange > 0 ? "+" : ""}{metrics.retention.reworkChange} p.p. em retrabalho vs. período anterior
           </p>
         </CardContent>
       </Card>

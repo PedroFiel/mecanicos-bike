@@ -3,7 +3,6 @@ import bcrypt from "bcryptjs"
 import { redirect, useActionData, useLoaderData, type ActionFunctionArgs, type LoaderFunctionArgs } from "react-router"
 import { z } from "zod"
 import prisma from "prisma/prisma"
-import { env } from "~/lib/env.server"
 import { sendEmail } from "~/lib/email.server"
 import { passwordChangedEmail } from "~/lib/email-templates.server"
 import { resetPasswordSchema } from "~/features/auth/types"
@@ -36,11 +35,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData()
-  const rawToken = formData.get("token") as string
+  const rawToken = formData.get("token")
   const password = formData.get("password") as string
   const confirmPassword = formData.get("confirmPassword") as string
 
-  if (!rawToken) {
+  if (typeof rawToken !== "string" || !/^[a-f0-9]{64}$/.test(rawToken)) {
     return { errors: { token: "Token inválido" } }
   }
 
@@ -76,38 +75,32 @@ export async function action({ request }: ActionFunctionArgs) {
   // Hash new password
   const hashedPassword = await bcrypt.hash(result.data.password, 10)
 
-  // Update password, increment tokenVersion (invalidates all sessions)
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      password: hashedPassword,
-      tokenVersion: { increment: 1 },
-    },
-  })
+  const changed = await prisma.$transaction(async (tx) => {
+    const now = new Date()
+    const claimed = await tx.authToken.updateMany({
+      where: { id: authToken.id, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    })
+    if (!claimed.count) return false
 
-  // Mark token as used
-  await prisma.authToken.update({
-    where: { id: authToken.id },
-    data: { usedAt: new Date() },
+    await tx.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword, tokenVersion: { increment: 1 } },
+    })
+    await tx.authToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: now } })
+    await tx.securityEvent.create({ data: { userId: user.id, type: "password_reset_used" } })
+    return true
   })
+  if (!changed) return { errors: { token: "Link inválido ou expirado. Solicite um novo." } }
 
-  // Record security event
-  await prisma.securityEvent.create({
-    data: {
-      userId: user.id,
-      type: "password_reset_used",
-    },
-  })
-
-  // Notify user of password change
-  if (env.RESEND_API_KEY) {
+  try {
     await sendEmail({
       to: user.email,
       subject: "Sua senha foi alterada — Mecânicos Bike",
       html: passwordChangedEmail(user.name),
     })
-  } else {
-    console.log("[DEV] Senha alterada para:", user.email)
+  } catch {
+    console.error("Falha ao enviar aviso de alteração de senha.")
   }
 
   return redirect("/login?reset=success")

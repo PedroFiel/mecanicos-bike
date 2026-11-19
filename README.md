@@ -10,27 +10,37 @@ Sistema de gestão para oficinas de bicicleta. Permite cadastrar clientes, bikes
 
 ### Pré-requisitos
 
-- Node.js 20+
+- Node.js 20.19+ ou 22 LTS
 - npm
 
 ### Instalação
 
 ```bash
 # 1. Instale as dependências
-npm install
+npm ci
 
 # 2. Configure as variáveis de ambiente
 cp .env.example .env
 # Edite o .env com seus valores (veja a seção Variáveis de ambiente)
 
-# 3. Aplique as migrations no banco local
-npx prisma migrate dev
+# 3. Crie um banco local vazio com o schema vigente
+# No Windows, veja o comando PowerShell logo abaixo.
+npx prisma db push
 
 # 4. (Opcional) Popule com dados de demonstração
 npm run db:seed
 
 # 5. Inicie o servidor de desenvolvimento
 npm run dev
+```
+
+No PowerShell, com o caminho padrão do `.env.example`, crie o arquivo SQLite antes de aplicar o schema.
+
+```powershell
+if (-not (Test-Path -LiteralPath 'prisma/database.sqlite')) {
+  New-Item -ItemType File -Path 'prisma/database.sqlite'
+}
+npx.cmd prisma db push
 ```
 
 O app estará disponível em `http://localhost:5173`.
@@ -43,12 +53,16 @@ Copie `.env.example` para `.env` e preencha:
 
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
-| `DATABASE_URL` | ✅ | URL do banco (SQLite local ou Turso em produção) |
+| `DATABASE_URL` | ✅ | URL SQLite usada pelo Prisma CLI. Em produção, a conexão do app usa `TURSO_DATABASE_URL` quando definida |
 | `JWT_SECRET` | ✅ | Segredo para assinar tokens JWT (mín. 32 chars) |
-| `TURSO_DATABASE_URL` | Produção | URL do banco Turso |
+| `TURSO_DATABASE_URL` | Produção | URL do banco Turso. Deixe indefinida para usar o SQLite local |
 | `TURSO_AUTH_TOKEN` | Produção | Token de autenticação do Turso |
-| `RESEND_API_KEY` | E-mail real | Chave da API do Resend para envio de e-mails |
-| `EMAIL_FROM` | E-mail real | Endereço remetente dos e-mails |
+| `EMAIL_PROVIDER` | Opcional | `resend` (padrão) ou `brevo` |
+| `RESEND_API_KEY` | Resend | Chave da API do Resend para envio de e-mails |
+| `EMAIL_FROM` | Resend | Endereço remetente dos e-mails |
+| `BREVO_API_KEY` | Brevo | Chave da API com acesso a e-mail transacional |
+| `BREVO_SENDER_EMAIL` | Brevo | Endereço de remetente verificado no painel do Brevo |
+| `BREVO_SENDER_NAME` | Opcional | Nome do remetente no Brevo. O padrão é `Mecânicos Bike` |
 | `APP_URL` | Produção | URL pública da aplicação (usada nos links de e-mail) |
 | `DEMO_PASSWORD` | Seed | Senha da conta demo usada pelo `npm run db:seed` |
 
@@ -59,17 +73,33 @@ Copie `.env.example` para `.env` e preencha:
 
 ---
 
+## E-mail com Brevo
+
+Verifique um remetente no Brevo e gere uma chave de API com acesso a e-mail transacional. No `.env` local, defina:
+
+```dotenv
+EMAIL_PROVIDER=brevo
+BREVO_API_KEY="sua-chave"
+BREVO_SENDER_EMAIL="email-verificado"
+BREVO_SENDER_NAME="Mecânicos Bike"
+APP_URL="http://localhost:5173"
+```
+
+Reinicie o servidor e use uma conta comum para testar o código de login, o link de recuperação e o aviso de senha alterada. No Vercel, configure essas variáveis no ambiente Preview, ajuste `APP_URL` para a URL publicada e gere um novo deploy. Para voltar ao Resend, selecione `EMAIL_PROVIDER=resend` e mantenha as credenciais do Resend configuradas.
+
 ## Banco de dados e migrations
 
 ### Desenvolvimento local (SQLite)
 
 ```bash
-# Criar/aplicar todas as migrations pendentes
-npx prisma migrate dev
+# Criar o banco local a partir do schema
+npx prisma db push
 
 # Abrir o Prisma Studio para inspecionar os dados
 npx prisma studio
 ```
+
+As migrations históricas não recriam um SQLite vazio. Use `prisma db push` para um banco local de desenvolvimento. Para um banco existente, revise o SQL e preserve os dados antes de aplicar mudanças.
 
 ### Produção (Turso)
 
@@ -78,7 +108,7 @@ O banco de produção é um **Turso** (libSQL). Como o Prisma Migrate não se co
 ```bash
 # 1. Gere o SQL da migration (comparando o schema atual com o banco)
 npx prisma migrate diff \
-  --from-url "file:./prisma/database/database.sqlite" \
+  --from-url "file:./prisma/database.sqlite" \
   --to-schema-datamodel prisma/schema.prisma \
   --script > migration.sql
 
@@ -103,6 +133,7 @@ turso db shell <nome-do-banco>
 | `npm run build` | Build de produção |
 | `npm run start` | Inicia o servidor de produção |
 | `npm run typecheck` | Verificação de tipos TypeScript |
+| `npm test` | Testes de serviços, e-mail, WhatsApp e isolamento em SQLite temporário |
 | `npm run db:seed` | Popula o banco com dados de demonstração |
 
 ---
@@ -114,7 +145,9 @@ Após rodar `npm run db:seed`, acesse com:
 - **E-mail:** `demo@oficina.test`
 - **Senha:** valor de `DEMO_PASSWORD` no seu `.env`
 
-> O 2FA está desabilitado para a conta demo para facilitar apresentações.
+O login demo abre o dashboard diretamente, com 40 clientes, 60 bikes e 300 atendimentos simulados. O seed recria apenas os dados da conta demo. Na demonstração, o WhatsApp mostra uma prévia da mensagem e permite simular o contato.
+
+O faturamento usa o valor dos atendimentos concluídos pela data do serviço. Ticket médio, retorno, garantia e gráficos de volume seguem o período selecionado. O histórico de faturamento cobre 12 meses, e as filas de revisão, recebimento e atendimento mostram a situação atual da oficina.
 
 ---
 

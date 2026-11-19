@@ -84,15 +84,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const appUrl = env.APP_URL ?? "http://localhost:5173"
     const resetUrl = `${appUrl}/reset-password?token=${rawToken}`
 
-    // Send email or log in dev
-    if (env.RESEND_API_KEY) {
+    try {
       await sendEmail({
         to: user.email,
         subject: "Redefinição de senha — Mecânicos Bike",
         html: passwordResetEmail(resetUrl, user.name),
       })
-    } else {
-      console.log("[DEV] Link de reset:", resetUrl)
+    } catch {
+      console.error("Falha ao enviar e-mail de redefinição de senha.")
     }
 
     // Record security event

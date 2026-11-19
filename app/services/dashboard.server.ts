@@ -1,627 +1,195 @@
-/**
- * dashboard.server.ts
- *
- * Consultas agregadas e métricas em tempo real para o Dashboard da Oficina.
- * Todas as consultas são estritamente isoladas por userId.
- */
-
 import prisma from "../../prisma/prisma";
-import { isReminderDue } from "./reminders.server";
 import { DEFAULT_WHATSAPP_TEMPLATE } from "../lib/default-services";
+import { buildWhatsAppLink, renderTemplate } from "../lib/whatsapp";
+import { listDueReminders } from "./reminders.server";
 
-export type PeriodFilter = "month" | "30days" | "90days" | "year";
+export type PeriodFilter = "mes" | "trimestre" | "ano";
 
-export interface PeriodDates {
-  currentStart: Date;
-  currentEnd: Date;
-  previousStart: Date;
-  previousEnd: Date;
-  label: string;
+const DAY_MS = 86_400_000;
+const calendar = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+});
+const shortDate = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" });
+const weekdayNames = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+
+function calendarDay(date: Date) {
+  return new Date(`${calendar.format(date)}T00:00:00Z`);
 }
 
-/**
- * Calcula as janelas de datas para o período atual e o período anterior para comparação.
- */
-export function getPeriodDates(period: PeriodFilter, referenceDate: Date = new Date()): PeriodDates {
-  const currentEnd = new Date(referenceDate);
-  let currentStart: Date;
-  let previousStart: Date;
-  let previousEnd: Date;
-  let label = "Mês Atual";
-
-  switch (period) {
-    case "30days": {
-      label = "Últimos 30 dias";
-      currentStart = new Date(currentEnd);
-      currentStart.setDate(currentStart.getDate() - 30);
-      previousEnd = new Date(currentStart);
-      previousStart = new Date(previousEnd);
-      previousStart.setDate(previousStart.getDate() - 30);
-      break;
-    }
-    case "90days": {
-      label = "Últimos 90 dias";
-      currentStart = new Date(currentEnd);
-      currentStart.setDate(currentStart.getDate() - 90);
-      previousEnd = new Date(currentStart);
-      previousStart = new Date(previousEnd);
-      previousStart.setDate(previousStart.getDate() - 90);
-      break;
-    }
-    case "year": {
-      label = "Ano Atual";
-      currentStart = new Date(currentEnd.getFullYear(), 0, 1);
-      previousEnd = new Date(currentEnd.getFullYear() - 1, currentEnd.getMonth(), currentEnd.getDate());
-      previousStart = new Date(currentEnd.getFullYear() - 1, 0, 1);
-      break;
-    }
-    case "month":
-    default: {
-      label = "Mês Atual";
-      currentStart = new Date(currentEnd.getFullYear(), currentEnd.getMonth(), 1);
-      // Fim do período anterior equivalente
-      previousEnd = new Date(currentEnd.getFullYear(), currentEnd.getMonth() - 1, currentEnd.getDate());
-      previousStart = new Date(currentEnd.getFullYear(), currentEnd.getMonth() - 1, 1);
-      break;
-    }
-  }
-
-  return { currentStart, currentEnd, previousStart, previousEnd, label };
+// Brasília is UTC−3 for the periods reported by this dashboard.
+function startOfMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 1, 3));
 }
 
-/**
- * Calcula variação percentual segura entre dois valores.
- */
-export function calculateVariation(current: number, previous: number): number | null {
-  if (previous === 0) {
-    return current > 0 ? 100 : 0;
+export function getPeriodDates(period: PeriodFilter, now: Date) {
+  const today = calendarDay(now);
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth();
+  const monthStart = startOfMonth(year, month);
+  if (period === "trimestre") {
+    const start = new Date(now.getTime() - 90 * DAY_MS);
+    return { start, previousStart: new Date(start.getTime() - 90 * DAY_MS), previousEnd: start };
   }
-  return Number((((current - previous) / previous) * 100).toFixed(1));
+
+  const start = period === "ano" ? startOfMonth(year, 0) : monthStart;
+  const previousStart = period === "ano" ? startOfMonth(year - 1, 0) : startOfMonth(year, month - 1);
+  const previousEnd = new Date(Math.min(start.getTime(), previousStart.getTime() + now.getTime() - start.getTime()));
+  return { start, previousStart, previousEnd };
 }
 
-/**
- * Normaliza número de telefone brasileiro para formato internacional wa.me (55XXXXXXXXXXX).
- */
-export function normalizePhoneForWhatsApp(phone?: string | null): string | null {
-  if (!phone) return null;
-  const digits = phone.replace(/\D/g, "");
-  if (!digits || digits.length < 10) return null;
-
-  // Se já tiver DDI do Brasil (55) e tiver 12 ou 13 dígitos
-  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
-    return digits;
-  }
-
-  // 10 dígitos (DDD + 8 dígitos) ou 11 dígitos (DDD + 9 dígitos)
-  if (digits.length === 10 || digits.length === 11) {
-    return `55${digits}`;
-  }
-
-  return null;
+function variation(current: number, previous: number) {
+  return previous === 0 ? (current === 0 ? 0 : null) : Math.round((current / previous - 1) * 1000) / 10;
 }
 
-/**
- * Interpola variáveis no template de mensagem do WhatsApp.
- */
-export function formatWhatsAppMessage(
-  template: string,
-  params: {
-    clientName: string;
-    bikeModel: string;
-    serviceName: string;
-    shopName?: string | null;
-    serviceDate?: Date | string | null;
-  }
-): string {
-  const shop = params.shopName?.trim() || "nossa oficina";
-  let formattedDate = "";
-  let formattedTimeAgo = "alguns meses";
-
-  if (params.serviceDate) {
-    const d = new Date(params.serviceDate);
-    formattedDate = d.toLocaleDateString("pt-BR");
-    const diffMonths = Math.max(
-      1,
-      Math.round((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24 * 30.43))
-    );
-    formattedTimeAgo = diffMonths === 1 ? "1 mês" : `${diffMonths} meses`;
-  }
-
-  return template
-    .replace(/{cliente}/g, params.clientName.trim())
-    .replace(/{bike}/g, params.bikeModel.trim())
-    .replace(/{servico}/g, params.serviceName.trim())
-    .replace(/{oficina}/g, shop)
-    .replace(/{data_ultimo}/g, formattedDate)
-    .replace(/{tempo}/g, formattedTimeAgo);
+function rate(part: number, total: number) {
+  return total ? Math.round(part / total * 1000) / 10 : 0;
 }
 
-/**
- * Obtém todos os dados do dashboard de forma consolidada e performática.
- */
-export async function getDashboardData(userId: number, period: PeriodFilter = "month") {
-  const dates = getPeriodDates(period);
-  const now = new Date();
-
-  // Dados do usuário (nome da oficina e template de WhatsApp)
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { shopName: true, whatsappTemplate: true },
-  });
-
-  const whatsappTemplate = user?.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE;
-  const shopName = user?.shopName || "Nossa Oficina";
-
-  // 1. CARDS: Faturamento e Ticket Médio (Período Atual e Anterior)
-  const currentAppointments = await prisma.appointment.findMany({
-    where: {
-      userId,
-      serviceDate: { gte: dates.currentStart, lte: dates.currentEnd },
-      status: { not: "CANCELADO" },
-    },
-    select: {
-      id: true,
-      totalCost: true,
-      status: true,
-      paymentStatus: true,
-      amountPaid: true,
-      linkType: true,
-      clientId: true,
-    },
-  });
-
-  const previousAppointments = await prisma.appointment.findMany({
-    where: {
-      userId,
-      serviceDate: { gte: dates.previousStart, lte: dates.previousEnd },
-      status: { not: "CANCELADO" },
-    },
-    select: {
-      id: true,
-      totalCost: true,
-      status: true,
-      paymentStatus: true,
-      amountPaid: true,
-    },
-  });
-
-  // Faturamento e ticket do período atual
-  const currentCompleted = currentAppointments.filter((a) => a.status === "CONCLUIDO");
-  const currentRevenue = currentCompleted.reduce((sum, a) => sum + (a.totalCost || 0), 0);
-  const currentTicket = currentCompleted.length > 0 ? currentRevenue / currentCompleted.length : 0;
-
-  // Faturamento e ticket do período anterior
-  const previousCompleted = previousAppointments.filter((a) => a.status === "CONCLUIDO");
-  const previousRevenue = previousCompleted.reduce((sum, a) => sum + (a.totalCost || 0), 0);
-  const previousTicket = previousCompleted.length > 0 ? previousRevenue / previousCompleted.length : 0;
-
-  const revenueVariation = calculateVariation(currentRevenue, previousRevenue);
-  const ticketVariation = calculateVariation(currentTicket, previousTicket);
-
-  // 2. CARDS: Total a Receber (geral da oficina pendente/parcial)
-  const pendingPaymentsAppointments = await prisma.appointment.findMany({
-    where: {
-      userId,
-      status: { not: "CANCELADO" },
-      paymentStatus: { in: ["PENDENTE", "PARCIAL"] },
-    },
-    include: {
-      client: { select: { id: true, fullName: true, phone: true } },
-      bike: { select: { id: true, model: true, brand: true } },
-    },
-    orderBy: { serviceDate: "asc" },
-  });
-
-  const totalReceivable = pendingPaymentsAppointments.reduce((sum, a) => {
-    const cost = a.totalCost || 0;
-    const paid = a.amountPaid || 0;
-    return sum + Math.max(0, cost - paid);
-  }, 0);
-
-  // 3. CARDS: Atendimentos em Aberto (status PENDENTE)
-  const openAppointmentsCount = await prisma.appointment.count({
-    where: {
-      userId,
-      status: "PENDENTE",
-    },
-  });
-
-  // 4. CARDS: Lembretes de Revisão (Vencendo nos próximos 15 dias ou vencidos)
-  const allActiveReminders = await prisma.maintenanceReminder.findMany({
-    where: {
-      userId,
-      status: { in: ["ABERTO", "CONTATADO"] },
-    },
-    include: {
-      client: { select: { id: true, fullName: true, phone: true } },
-      bike: {
-        select: {
-          id: true,
-          model: true,
-          brand: true,
-          currentOdometerKm: true,
-          currentHours: true,
-        },
-      },
-      appointment: { select: { id: true, title: true, serviceDate: true } },
-    },
-    orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-  });
-
-  // Filtra os que estão a vencer nos próximos 15 dias ou vencidos
-  const dueReminders = allActiveReminders.filter((rem) =>
-    isReminderDue(
-      {
-        dueDate: rem.dueDate,
-        dueKm: rem.dueKm,
-        dueHours: rem.dueHours,
-        status: rem.status,
-      },
-      {
-        currentOdometerKm: rem.bike.currentOdometerKm,
-        currentHours: rem.bike.currentHours,
-      },
-      now,
-      15
-    )
-  );
-
-  const revisionsDueIn15DaysCount = dueReminders.length;
-
-  // 5. CARDS: Taxa de Retorno e Retrabalho
-  // Total de clientes com atendimentos na oficina
-  const clientAppointmentCounts = await prisma.appointment.groupBy({
-    by: ["clientId"],
-    where: { userId, status: { not: "CANCELADO" } },
-    _count: { id: true },
-  });
-  const returningClientsCount = clientAppointmentCounts.filter((c) => c._count.id > 1).length;
-  const totalClientsWithAppointments = clientAppointmentCounts.length;
-  const customerRetentionRate =
-    totalClientsWithAppointments > 0
-      ? Number(((returningClientsCount / totalClientsWithAppointments) * 100).toFixed(1))
-      : 0;
-
-  // Taxa de retrabalho no período selecionado
-  const reworkCount = currentAppointments.filter(
-    (a) => a.linkType === "RETORNO_GARANTIA" || a.linkType === "RETRABALHO"
-  ).length;
-  const reworkRate =
-    currentAppointments.length > 0
-      ? Number(((reworkCount / currentAppointments.length) * 100).toFixed(1))
-      : 0;
-
-  // ========================================================
-  // GRÁFICOS
-  // ========================================================
-
-  // Gráfico 1: Faturamento por mês (últimos 12 meses, mão de obra x peças)
-  const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-  const appointmentsLast12Months = await prisma.appointment.findMany({
-    where: {
-      userId,
-      serviceDate: { gte: twelveMonthsAgo },
-      status: "CONCLUIDO",
-    },
-    include: {
-      items: true,
-    },
-    orderBy: { serviceDate: "asc" },
-  });
-
-  // Cria estrutura para os 12 meses
-  const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-  const revenueByMonthMap = new Map<string, { month: string; labor: number; parts: number; total: number }>();
-
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const label = `${monthNames[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}`;
-    revenueByMonthMap.set(key, { month: label, labor: 0, parts: 0, total: 0 });
-  }
-
-  for (const app of appointmentsLast12Months) {
-    const d = new Date(app.serviceDate);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const entry = revenueByMonthMap.get(key);
-    if (!entry) continue;
-
-    if (app.items && app.items.length > 0) {
-      for (const item of app.items) {
-        entry.labor += Number(item.laborCost) || 0;
-        entry.parts += Number(item.partsCost) || 0;
-      }
-    } else if (app.totalCost) {
-      entry.labor += app.totalCost;
-    }
-    entry.total = entry.labor + entry.parts;
-  }
-
-  const revenueByMonth = Array.from(revenueByMonthMap.values());
-
-  // Gráfico 2: Serviços mais realizados (Top 8)
-  const allItems = await prisma.appointmentItem.findMany({
-    where: {
-      appointment: { userId, status: "CONCLUIDO" },
-    },
-    select: {
-      description: true,
-      laborCost: true,
-      partsCost: true,
-    },
-  });
-
-  const servicesMap = new Map<string, { name: string; count: number; total: number }>();
-  for (const it of allItems) {
-    const name = it.description.trim();
-    const existing = servicesMap.get(name) || { name, count: 0, total: 0 };
-    existing.count += 1;
-    existing.total += (Number(it.laborCost) || 0) + (Number(it.partsCost) || 0);
-    servicesMap.set(name, existing);
-  }
-
-  const topServices = Array.from(servicesMap.values())
-    .sort((a, b) => b.count - a.count)
+function topEight(labels: string[]) {
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return Array.from(counts, ([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR"))
     .slice(0, 8);
+}
 
-  // Gráfico 3: Atendimentos por dia da semana
-  const dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-  const appointmentsByWeekday = [
-    { day: "Seg", fullDay: "Segunda-feira", count: 0 },
-    { day: "Ter", fullDay: "Terça-feira", count: 0 },
-    { day: "Qua", fullDay: "Quarta-feira", count: 0 },
-    { day: "Qui", fullDay: "Quinta-feira", count: 0 },
-    { day: "Sex", fullDay: "Sexta-feira", count: 0 },
-    { day: "Sáb", fullDay: "Sábado", count: 0 },
-    { day: "Dom", fullDay: "Domingo", count: 0 },
-  ];
+export async function getDashboardData(userId: number, period: PeriodFilter, now = new Date()) {
+  const today = calendarDay(now);
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth();
+  const { start, previousStart, previousEnd } = getPeriodDates(period, now);
+  const chartStart = startOfMonth(year, month - 11);
+  const historyStart = new Date(Math.min(chartStart.getTime(), previousStart.getTime()));
+  const cutoff = new Date(now.getTime() - 7 * DAY_MS);
 
-  const weekdayIndexMap: Record<number, number> = {
-    1: 0, // Seg
-    2: 1, // Ter
-    3: 2, // Qua
-    4: 3, // Qui
-    5: 4, // Sex
-    6: 5, // Sáb
-    0: 6, // Dom
-  };
+  const [user, history, paymentQueue, openAppointments, reminders] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { shopName: true, whatsappTemplate: true, isDemo: true } }),
+    prisma.appointment.findMany({
+      where: { userId, serviceDate: { gte: historyStart, lt: now }, status: { not: "CANCELADO" } },
+      select: {
+        serviceDate: true, status: true, totalCost: true, amountPaid: true, paymentStatus: true,
+        linkType: true, clientId: true, bike: { select: { brand: true } },
+        items: { select: { description: true, laborCost: true, partsCost: true } },
+      },
+    }),
+    prisma.appointment.findMany({
+      where: { userId, status: { not: "CANCELADO" }, paymentStatus: { in: ["PENDENTE", "PARCIAL"] } },
+      select: { id: true, title: true, totalCost: true, amountPaid: true, serviceDate: true, client: { select: { fullName: true } } },
+      orderBy: [{ serviceDate: "asc" }, { id: "asc" }],
+    }),
+    prisma.appointment.findMany({
+      where: { userId, status: "PENDENTE" },
+      select: { id: true, title: true, serviceDate: true, client: { select: { fullName: true } } },
+      orderBy: [{ serviceDate: "asc" }, { id: "asc" }],
+    }),
+    listDueReminders(userId, { withinDays: 15, today: now }),
+  ]);
 
-  for (const app of appointmentsLast12Months) {
-    const dayOfWeek = new Date(app.serviceDate).getDay();
-    const targetIdx = weekdayIndexMap[dayOfWeek];
-    if (targetIdx !== undefined) {
-      appointmentsByWeekday[targetIdx].count += 1;
-    }
+  const current = history.filter((entry) => entry.serviceDate >= start);
+  const previous = history.filter((entry) => entry.serviceDate >= previousStart && entry.serviceDate < previousEnd);
+  function summarize(entries: typeof history) {
+    const completed = entries.filter((entry) => entry.status === "CONCLUIDO");
+    const revenue = completed.reduce((total, entry) => total + (entry.totalCost ?? 0), 0);
+    const visits = new Map<number, number>();
+    for (const entry of entries) visits.set(entry.clientId, (visits.get(entry.clientId) ?? 0) + 1);
+    return {
+      revenue,
+      ticket: completed.length ? revenue / completed.length : 0,
+      retention: rate(Array.from(visits.values()).filter((count) => count > 1).length, visits.size),
+      rework: rate(entries.filter((entry) => entry.linkType === "GARANTIA").length, entries.length),
+    };
   }
+  const summary = summarize(current);
+  const prior = summarize(previous);
+  const daysSince = (date: Date) => Math.max(0, (today.getTime() - calendarDay(date).getTime()) / DAY_MS);
+  const pendingPayments = paymentQueue
+    .map(({ totalCost, amountPaid, ...entry }) => ({
+      ...entry, balance: Math.max(0, (totalCost ?? 0) - amountPaid), days: daysSince(entry.serviceDate),
+    }))
+    .filter(({ balance }) => balance > 0);
+  const stalledAppointments = openAppointments.filter(({ serviceDate }) => serviceDate < cutoff)
+    .map((entry) => ({ ...entry, days: daysSince(entry.serviceDate) }));
 
-  // Gráfico 4: Marcas de bike atendidas (Top 8)
-  const bikesWithAppointments = await prisma.appointment.findMany({
-    where: { userId, status: "CONCLUIDO" },
-    select: { bike: { select: { brand: true } } },
+  const revenueByMonth = Array.from({ length: 12 }, (_, index) => {
+    const date = startOfMonth(year, month - 11 + index);
+    const label = new Intl.DateTimeFormat("pt-BR", {
+      month: "short", year: "2-digit", timeZone: "America/Sao_Paulo",
+    }).format(date);
+    return { month: label, labor: 0, parts: 0 };
   });
-
-  const brandsMap = new Map<string, number>();
-  for (const b of bikesWithAppointments) {
-    const brand = b.bike.brand.trim() || "Outras";
-    brandsMap.set(brand, (brandsMap.get(brand) || 0) + 1);
+  for (const entry of history) {
+    if (entry.status !== "CONCLUIDO" || entry.serviceDate < chartStart) continue;
+    const date = calendarDay(entry.serviceDate);
+    const index = 11 - ((year - date.getUTCFullYear()) * 12 + month - date.getUTCMonth());
+    const bucket = revenueByMonth[index];
+    if (!bucket) continue;
+    bucket.labor += entry.items.length
+      ? entry.items.reduce((total, item) => total + item.laborCost, 0)
+      : entry.totalCost ?? 0;
+    bucket.parts += entry.items.reduce((total, item) => total + item.partsCost, 0);
   }
 
-  const topBrands = Array.from(brandsMap.entries())
-    .map(([brand, count]) => ({ brand, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
-
-  // Gráfico 5: Status de pagamento
-  const paymentStatusCounts = await prisma.appointment.groupBy({
-    by: ["paymentStatus"],
-    where: { userId, status: { not: "CANCELADO" } },
-    _count: { id: true },
-    _sum: { totalCost: true },
-  });
-
-  const paymentStatusMap: Record<string, { label: string; count: number; total: number; color: string }> = {
-    PAGO: { label: "Pago", count: 0, total: 0, color: "var(--chart-2, #10b981)" },
-    PARCIAL: { label: "Parcial", count: 0, total: 0, color: "var(--chart-4, #f59e0b)" },
-    PENDENTE: { label: "Pendente", count: 0, total: 0, color: "var(--chart-1, #ef4444)" },
-  };
-
-  for (const row of paymentStatusCounts) {
-    if (paymentStatusMap[row.paymentStatus]) {
-      paymentStatusMap[row.paymentStatus].count = row._count.id;
-      paymentStatusMap[row.paymentStatus].total = row._sum.totalCost || 0;
-    }
+  const weekday = weekdayNames.map((name) => ({ name, count: 0 }));
+  for (const entry of current) weekday[(calendarDay(entry.serviceDate).getUTCDay() + 6) % 7].count++;
+  const completed = current.filter((entry) => entry.status === "CONCLUIDO");
+  const payment = { received: 0, partialBalance: 0, pendingBalance: 0 };
+  for (const entry of current) {
+    const cost = Math.max(0, entry.totalCost ?? 0);
+    const paid = Math.min(cost, Math.max(0, entry.amountPaid));
+    payment.received += paid;
+    if (entry.paymentStatus === "PARCIAL") payment.partialBalance += cost - paid;
+    if (entry.paymentStatus === "PENDENTE") payment.pendingBalance += cost - paid;
   }
 
-  const paymentStatusDistribution = Object.values(paymentStatusMap);
-
-  // ========================================================
-  // LISTAS DE AÇÃO
-  // ========================================================
-
-  // 1. Clientes para Chamar (ordenados pelo mais urgente)
-  const clientsToCall = dueReminders.map((rem) => {
-    const normalizedPhone = normalizePhoneForWhatsApp(rem.client.phone);
-    const hasValidPhone = normalizedPhone !== null;
-
-    // Critério e detalhes de urgência
-    let criteria: "DATA" | "KM" | "HORAS" = "DATA";
-    let urgencyLabel = "";
-    let isOverdue = false;
-    let daysDiff: number | null = null;
-
-    if (rem.dueDate) {
-      const diffMs = new Date(rem.dueDate).getTime() - now.getTime();
-      daysDiff = Math.round(diffMs / (1000 * 60 * 60 * 24));
-      if (daysDiff < 0) {
-        isOverdue = true;
-        urgencyLabel = `Vencido há ${Math.abs(daysDiff)} dia(s)`;
-      } else if (daysDiff === 0) {
-        isOverdue = true;
-        urgencyLabel = "Vence hoje";
-      } else {
-        urgencyLabel = `Vence em ${daysDiff} dia(s)`;
-      }
-    }
-
-    if (
-      rem.dueKm != null &&
-      rem.bike.currentOdometerKm != null &&
-      rem.bike.currentOdometerKm >= rem.dueKm
-    ) {
-      criteria = "KM";
-      isOverdue = true;
-      const kmExceeded = rem.bike.currentOdometerKm - rem.dueKm;
-      urgencyLabel = `Km atingido (+${kmExceeded} km)`;
-    } else if (
-      rem.dueHours != null &&
-      rem.bike.currentHours != null &&
-      rem.bike.currentHours >= rem.dueHours
-    ) {
-      criteria = "HORAS";
-      isOverdue = true;
-      const hoursExceeded = rem.bike.currentHours - rem.dueHours;
-      urgencyLabel = `Horímetro atingido (+${hoursExceeded} h)`;
-    }
-
-    // Mensagem formatada para o WhatsApp
-    const rawMessage = formatWhatsAppMessage(whatsappTemplate, {
-      clientName: rem.client.fullName,
-      bikeModel: `${rem.bike.brand} ${rem.bike.model}`,
-      serviceName: rem.title,
-      shopName,
-      serviceDate: rem.appointment.serviceDate,
+  const clientsToCall = reminders.map((reminder) => {
+    const { bike, dueDate, dueKm, dueHours } = reminder;
+    const days = dueDate ? (calendarDay(dueDate).getTime() - today.getTime()) / DAY_MS : null;
+    const kmReached = dueKm != null && bike.currentOdometerKm != null && bike.currentOdometerKm >= dueKm;
+    const hoursReached = dueHours != null && bike.currentHours != null && bike.currentHours >= dueHours;
+    const criteria = [
+      kmReached ? `${dueKm!.toLocaleString("pt-BR")} km` : "",
+      hoursReached ? `${dueHours!.toLocaleString("pt-BR")} h` : "",
+      dueDate && (days === null || days <= 15) ? shortDate.format(dueDate) : "",
+    ].filter(Boolean);
+    const overdue = kmReached || hoursReached || (days !== null && days < 0);
+    const urgency = overdue ? "Vencido" : days === 0 ? "Vence hoje" : `Vence em ${days} dias`;
+    const bikeName = [bike.brand, bike.model].filter(Boolean).join(" ");
+    const service = reminder.serviceTemplate.name;
+    const serviceDate = reminder.appointmentItem.appointment.serviceDate;
+    const message = renderTemplate(user?.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE, {
+      cliente: bike.client.fullName, bike: bikeName, servico: service,
+      oficina: user?.shopName || "nossa oficina", data_ultimo: shortDate.format(serviceDate),
+      tempo: `${Math.max(1, Math.round(daysSince(serviceDate) / 30))} mês(es)`,
     });
-
-    const whatsappUrl = hasValidPhone
-      ? `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(rawMessage)}`
-      : null;
-
     return {
-      reminderId: rem.id,
-      status: rem.status,
-      title: rem.title,
-      criteria,
-      urgencyLabel,
-      isOverdue,
-      daysDiff: daysDiff ?? 999,
-      client: {
-        id: rem.client.id,
-        fullName: rem.client.fullName,
-        phone: rem.client.phone,
-        normalizedPhone,
-        hasValidPhone,
-      },
-      bike: {
-        id: rem.bike.id,
-        brand: rem.bike.brand,
-        model: rem.bike.model,
-      },
-      whatsappUrl,
-      whatsappMessage: rawMessage,
+      id: reminder.id, status: reminder.status, contactedAt: reminder.contactedAt,
+      clientId: bike.client.id, clientName: bike.client.fullName, bikeName, service,
+      criteria: criteria.join(" · "), urgency, overdue, days,
+      whatsappUrl: user?.isDemo ? null : buildWhatsAppLink(bike.client.phone, message),
+      demoMessage: user?.isDemo && buildWhatsAppLink(bike.client.phone, message) ? message : null,
     };
-  });
-
-  // Ordena lista de clientes para chamar: vencidos primeiro (menor daysDiff), depois próximos
-  clientsToCall.sort((a, b) => a.daysDiff - b.daysDiff);
-
-  // 2. Pagamentos Pendentes
-  const pendingPaymentsList = pendingPaymentsAppointments.map((app) => {
-    const total = app.totalCost || 0;
-    const paid = app.amountPaid || 0;
-    const balance = Math.max(0, total - paid);
-    const serviceDate = new Date(app.serviceDate);
-    const daysPending = Math.max(
-      0,
-      Math.floor((now.getTime() - serviceDate.getTime()) / (1000 * 60 * 60 * 24))
-    );
-
-    return {
-      appointmentId: app.id,
-      title: app.title,
-      client: app.client,
-      bike: app.bike,
-      paymentStatus: app.paymentStatus,
-      totalCost: total,
-      amountPaid: paid,
-      balance,
-      daysPending,
-      serviceDate: app.serviceDate,
-    };
-  });
-
-  // Ordena por dias pendentes (mais antigos primeiro)
-  pendingPaymentsList.sort((a, b) => b.daysPending - a.daysPending);
-
-  // 3. Atendimentos Parados (> 7 dias em aberto)
-  const sevenDaysAgo = new Date(now);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-  const staleAppointments = await prisma.appointment.findMany({
-    where: {
-      userId,
-      status: "PENDENTE",
-      serviceDate: { lte: sevenDaysAgo },
-    },
-    include: {
-      client: { select: { id: true, fullName: true, phone: true } },
-      bike: { select: { id: true, model: true, brand: true } },
-    },
-    orderBy: { serviceDate: "asc" },
-  });
-
-  const staleAppointmentsList = staleAppointments.map((app) => {
-    const serviceDate = new Date(app.serviceDate);
-    const daysStale = Math.floor((now.getTime() - serviceDate.getTime()) / (1000 * 60 * 60 * 24));
-
-    return {
-      appointmentId: app.id,
-      title: app.title,
-      client: app.client,
-      bike: app.bike,
-      serviceDate: app.serviceDate,
-      daysStale,
-      totalCost: app.totalCost,
-    };
-  });
+  }).sort((a, b) => Number(b.overdue) - Number(a.overdue)
+    || (a.days ?? 0) - (b.days ?? 0) || a.id - b.id);
 
   return {
-    period,
-    dates,
     metrics: {
-      revenue: {
-        value: currentRevenue,
-        variation: revenueVariation,
-      },
-      ticket: {
-        value: currentTicket,
-        variation: ticketVariation,
-      },
-      receivable: {
-        value: totalReceivable,
-        count: pendingPaymentsAppointments.length,
-      },
-      openAppointments: {
-        value: openAppointmentsCount,
-      },
-      revisionsDue: {
-        value: revisionsDueIn15DaysCount,
-      },
+      revenue: { value: summary.revenue, variation: variation(summary.revenue, prior.revenue) },
+      ticket: { value: summary.ticket, variation: variation(summary.ticket, prior.ticket) },
+      receivable: { value: pendingPayments.reduce((total, entry) => total + entry.balance, 0), count: pendingPayments.length },
+      openAppointments: { value: openAppointments.length },
+      revisionsDue: { value: reminders.length },
       retention: {
-        customerRetentionRate,
-        reworkRate,
+        customerRetentionRate: summary.retention,
+        reworkRate: summary.rework,
+        retentionChange: Math.round((summary.retention - prior.retention) * 10) / 10,
+        reworkChange: Math.round((summary.rework - prior.rework) * 10) / 10,
       },
     },
     charts: {
-      revenueByMonth,
-      topServices,
-      appointmentsByWeekday,
-      topBrands,
-      paymentStatusDistribution,
+      revenueByMonth, weekday, payment,
+      topServices: topEight(completed.flatMap((entry) => entry.items.map((item) => item.description.trim()))),
+      topBrands: topEight(current.map((entry) => entry.bike.brand?.trim() || "Sem marca")),
     },
-    actionLists: {
-      clientsToCall,
-      pendingPayments: pendingPaymentsList,
-      staleAppointments: staleAppointmentsList,
-    },
+    clientsToCall, pendingPayments, stalledAppointments,
   };
 }

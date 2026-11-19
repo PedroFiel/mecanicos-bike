@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { listClients, createClient } from "~/services/clients.server"
 
 const createClientSchema = z.object({
@@ -15,7 +15,7 @@ const createClientSchema = z.object({
 
 // GET /api/clients — lista todos os clientes do usuário autenticado
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const url = new URL(request.url)
@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // POST /api/clients — cria um novo cliente
 export async function action({ request }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   if (request.method !== "POST") {

@@ -7,10 +7,10 @@ export const serviceTemplateSchema = z.object({
     .min(3, "O nome deve ter pelo menos 3 caracteres")
     .max(80, "O nome deve ter no máximo 80 caracteres"),
   category: z.enum(SERVICE_CATEGORIES, {
-    errorMap: () => ({ message: "Selecione uma categoria válida" }),
+    error: "Selecione uma categoria válida",
   }),
   defaultLaborCost: z.coerce
-    .number({ invalid_type_error: "Informe um valor numérico" })
+    .number({ error: "Informe um valor numérico" })
     .min(0, "O valor de mão de obra não pode ser negativo"),
   estimatedMinutes: z.coerce
     .number()

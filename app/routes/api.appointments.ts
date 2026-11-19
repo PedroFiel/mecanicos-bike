@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { listAppointments, createAppointment } from "~/services/appointments.server"
 
 const appointmentItemInputSchema = z.object({
@@ -16,16 +16,18 @@ const createAppointmentSchema = z.object({
   bikeId: z.number().int().positive("Bike é obrigatória"),
   title: z.string().min(1, "Título é obrigatório"),
   description: z.string().optional().nullable(),
-  serviceDate: z.string().optional(),
+  serviceDate: z.string().refine((value) => !Number.isNaN(Date.parse(value))).optional(),
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
   odometerKm: z.number().int().nonnegative().optional().nullable(),
   usageHours: z.number().int().nonnegative().optional().nullable(),
-  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO", "CANCELADO"]).optional(),
-  amountPaid: z.number().nonnegative().optional().nullable(),
-  paymentMethod: z.enum(["PIX", "DINHEIRO", "CARTAO_CREDITO", "CARTAO_DEBITO", "OUTRO"]).optional().nullable(),
-  paidAt: z.string().optional().nullable(),
+  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).optional(),
+  amountPaid: z.number().nonnegative().nullish().transform((amount) => amount ?? undefined),
+  paymentMethod: z.enum(["PIX", "DINHEIRO", "CREDITO", "DEBITO", "CARTAO_CREDITO", "CARTAO_DEBITO"])
+    .transform((method) => method === "CARTAO_CREDITO" ? "CREDITO" as const : method === "CARTAO_DEBITO" ? "DEBITO" as const : method).optional().nullable(),
+  paidAt: z.string().refine((value) => !Number.isNaN(Date.parse(value))).nullish(),
   parentAppointmentId: z.number().int().positive().optional().nullable(),
-  linkType: z.enum(["REVISAO_PROGRAMADA", "RETORNO_GARANTIA", "RETRABALHO", "AVULSO"]).optional().nullable(),
+  linkType: z.enum(["CONTINUACAO", "GARANTIA", "RETORNO_GARANTIA", "RETRABALHO"])
+    .transform((type) => type === "CONTINUACAO" ? type : "GARANTIA" as const).optional().nullable(),
   items: z.array(appointmentItemInputSchema).optional(),
   totalCost: z.number().nonnegative().optional().nullable(),
 })
@@ -33,7 +35,7 @@ const createAppointmentSchema = z.object({
 // GET /api/appointments — lista todos os atendimentos do usuário autenticado
 // Query params opcionais: ?clientId=1&status=PENDENTE
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const url = new URL(request.url)
@@ -52,7 +54,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // POST /api/appointments — registra um novo atendimento
 export async function action({ request }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   if (request.method !== "POST") {
@@ -89,8 +91,9 @@ export async function action({ request }: ActionFunctionArgs) {
     paidAt: result.data.paidAt ? new Date(result.data.paidAt) : null,
     parentAppointmentId: result.data.parentAppointmentId,
     linkType: result.data.linkType,
-    items: result.data.items,
-    totalCost: result.data.totalCost ?? null,
+    items: result.data.items ?? (result.data.totalCost == null ? [] : [{
+      description: "Serviço avulso", laborCost: result.data.totalCost, partsCost: 0,
+    }]),
   })
 
   if (!appointment) return Response.json({ error: "Cliente ou bike não encontrado" }, { status: 404 })

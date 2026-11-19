@@ -151,7 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Se conta demo: criar sessão diretamente (sem 2FA)
   if (user.isDemo) {
-    return createUserSession(user.id, user.email, user.tokenVersion, "/")
+    return createUserSession(user.id, user.email, user.tokenVersion, "/dashboard")
   }
 
   // Se dispositivo confiável registrado anteriormente: criar sessão direta (sem 2FA)
@@ -170,6 +170,7 @@ export async function action({ request }: ActionFunctionArgs) {
           userId: user.id,
           type: "trusted_device",
           tokenHash: deviceTokenHash,
+          usedAt: null,
           expiresAt: { gt: new Date() },
         },
       })
@@ -181,12 +182,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // --- Fluxo 2FA ---
-  const code = String(Math.floor(100000 + Math.random() * 900000)) // 6 dígitos
+  const code = String(crypto.randomInt(100000, 1000000)) // 6 dígitos
   const tokenHash = crypto.createHash("sha256").update(code).digest("hex")
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutos
 
   // Salvar o AuthToken no banco
-  await prisma.authToken.create({
+  const challenge = await prisma.authToken.create({
     data: {
       userId: user.id,
       type: "2fa_code",
@@ -219,7 +220,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Setar cookie de desafio e redirecionar para /login/verify
-  const challengeCookie = createChallengeCookie(user.id)
+  const challengeCookie = createChallengeCookie(user.id, challenge.id, user.tokenVersion)
   return redirect("/login/verify", {
     headers: {
       "Set-Cookie": challengeCookie,

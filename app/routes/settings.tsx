@@ -77,7 +77,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (!parsed.success) {
       return {
         success: false,
-        error: parsed.error.errors.map((e) => e.message).join(", "),
+        error: parsed.error.issues.map((e) => e.message).join(", "),
       };
     }
 
@@ -103,7 +103,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (!parsed.success) {
       return {
         success: false,
-        error: parsed.error.errors.map((e) => e.message).join(", "),
+        error: parsed.error.issues.map((e) => e.message).join(", "),
       };
     }
 

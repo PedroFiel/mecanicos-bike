@@ -19,7 +19,7 @@ import { NavLink, useNavigation, Form } from "react-router";
 import {
   formatCurrency,
   formatDate,
-  type AppointmentItemInput,
+  type AppointmentItemFormData as AppointmentItemInput,
 } from "~/features/appointments/types";
 import { Spinner } from "~/components/ui/spinner";
 import {

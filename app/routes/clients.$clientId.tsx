@@ -352,7 +352,7 @@ export default function Page() {
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge variant={payBadge.variant}>
+                              <Badge variant="outline" className={payBadge.className}>
                                 {payBadge.label}
                               </Badge>
                             </TableCell>
