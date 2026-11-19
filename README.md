@@ -103,25 +103,28 @@ As migrations históricas não recriam um SQLite vazio. Use `prisma db push` par
 
 ### Produção (Turso)
 
-O banco de produção é um **Turso** (libSQL). Como o Prisma Migrate não se conecta ao Turso diretamente, o fluxo é:
+O banco de produção é um **Turso** (libSQL). O Prisma Migrate não conecta no Turso, então as migrations são aplicadas pelo script `npm run db:turso`, que lê `TURSO_DATABASE_URL` e `TURSO_AUTH_TOKEN` do `.env` e registra o que já rodou na tabela `_manual_migrations`.
+
+Ordem para publicar esta versão:
 
 ```bash
-# 1. Gere o SQL da migration (comparando o schema atual com o banco)
-npx prisma migrate diff \
-  --from-url "file:./prisma/database.sqlite" \
-  --to-schema-datamodel prisma/schema.prisma \
-  --script > migration.sql
+# 1. Ver o que está pendente
+npm run db:turso -- status
 
-# 2. Revise o arquivo migration.sql gerado
+# 2. Backup de todas as tabelas em backups/ (pasta ignorada pelo git)
+npm run db:turso -- backup
 
-# 3. Aplique no banco de produção via CLI do Turso
-turso db shell <nome-do-banco> < migration.sql
+# 3. Aplicar as migrations compatíveis com o código atual
+npm run db:turso -- apply
 
-# Ou execute comandos SQL diretamente:
-turso db shell <nome-do-banco>
+# 4. Fazer o merge/deploy do código novo
+
+# 5. Depois do deploy, aplicar as migrations marcadas como pós-deploy
+#    (remove a tabela antiga service_details, que o código anterior ainda lê)
+npm run db:turso -- apply --pos-deploy
 ```
 
-> **Pré-requisito:** autentique no CLI do Turso antes: `turso auth login`
+Se uma migration já tiver sido aplicada à mão, registre-a com `npm run db:turso -- mark <nome-da-migration>`. A migration `normaliza_email_cpf_telefone` falha de propósito se existirem dois usuários cujo e-mail só difere por maiúsculas/minúsculas; nesse caso, resolva o cadastro duplicado antes.
 
 ---
 
@@ -133,7 +136,8 @@ turso db shell <nome-do-banco>
 | `npm run build` | Build de produção |
 | `npm run start` | Inicia o servidor de produção |
 | `npm run typecheck` | Verificação de tipos TypeScript |
-| `npm test` | Testes de serviços, e-mail, WhatsApp e isolamento em SQLite temporário |
+| `npm test` | Testes de serviços, e-mail, WhatsApp, regras de atendimento/login e isolamento em SQLite temporário |
+| `npm run db:turso -- <status\|backup\|apply>` | Backup e migrations do banco de produção (Turso) |
 | `npm run db:seed` | Popula o banco com dados de demonstração |
 
 ---
@@ -147,11 +151,17 @@ Após rodar `npm run db:seed`, acesse com:
 
 O login demo abre o dashboard diretamente, com 40 clientes, 60 bikes e 300 atendimentos simulados. O seed recria apenas os dados da conta demo. Na demonstração, o WhatsApp mostra uma prévia da mensagem e permite simular o contato.
 
+O status do pagamento é calculado pelo valor pago em relação ao total (Pendente, Parcial ou Pago); escolher "Pago" sem informar valor considera o total. Atendimentos cancelados não geram lembretes de revisão.
+
 O faturamento usa o valor dos atendimentos concluídos pela data do serviço. Ticket médio, retorno, garantia e gráficos de volume seguem o período selecionado. O histórico de faturamento cobre 12 meses, e as filas de revisão, recebimento e atendimento mostram a situação atual da oficina.
 
 ---
 
-## Deploy (Fly.io)
+## Deploy
+
+O preview dos PRs é publicado no Vercel (variáveis configuradas no painel do projeto). O `Dockerfile` continua disponível para o Fly.io. Em ambos, o limite de tentativas por IP fica em memória: com várias instâncias ou funções serverless ele vale por instância, e o bloqueio por conta (no banco) continua valendo.
+
+### Fly.io
 
 ```bash
 # Primeiro deploy

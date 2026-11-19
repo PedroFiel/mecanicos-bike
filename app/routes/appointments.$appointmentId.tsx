@@ -1,10 +1,11 @@
-import { NavLink, Form, useNavigation, useActionData } from "react-router";
+import { NavLink, Form, data, useNavigation } from "react-router";
 import type { Route } from "./+types/appointments.$appointmentId";
 import { requireAuth } from "~/lib/auth.server";
 import {
+  AppointmentRuleError,
   getAppointmentById,
+  getAppointmentChain,
   markAsPaid,
-  type PaymentMethod,
 } from "~/services/appointments.server";
 import {
   Card,
@@ -45,6 +46,7 @@ import {
   formatLinkType,
   formatReminderStatus,
   getPaymentStatusBadge,
+  markAsPaidSchema,
 } from "~/features/appointments/types";
 import type { RouteHandle } from "~/types/route";
 
@@ -58,33 +60,48 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!appointment) {
     throw new Response("Atendimento não encontrado", { status: 404 });
   }
-  return { appointment };
+  const chain = await getAppointmentChain(appointment.id, userId);
+  return { appointment, chain };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
   const userId = await requireAuth(request);
   const appointmentId = Number(params.appointmentId);
   const formData = await request.formData();
-  const intent = formData.get("intent") as string;
+  const intent = formData.get("intent");
 
   if (intent === "mark_as_paid") {
-    const method = (formData.get("paymentMethod") as PaymentMethod) || "PIX";
-    const amount = formData.get("amount")
-      ? Number(formData.get("amount"))
-      : undefined;
+    const parsed = markAsPaidSchema.safeParse({
+      paymentMethod: formData.get("paymentMethod") || undefined,
+      amount: formData.get("amount"),
+    });
+    if (!parsed.success) {
+      return data({ success: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." }, { status: 400 });
+    }
 
-    await markAsPaid(appointmentId, userId, { method, amount });
+    try {
+      const updated = await markAsPaid(appointmentId, userId, {
+        method: parsed.data.paymentMethod,
+        amount: parsed.data.amount,
+      });
+      if (!updated) return data({ success: false, error: "Atendimento não encontrado." }, { status: 404 });
+    } catch (error) {
+      if (error instanceof AppointmentRuleError) {
+        return data({ success: false, error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
     return { success: true, message: "Atendimento marcado como pago!" };
   }
 
-  return { success: false };
+  return data({ success: false, error: "Ação não reconhecida." }, { status: 400 });
 }
 
 export default function Page({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { appointment } = loaderData;
+  const { appointment, chain } = loaderData;
   const navigation = useNavigation();
   const isMarkingPaid =
     navigation.state === "submitting" &&
@@ -133,7 +150,14 @@ export default function Page({
         </div>
       </div>
 
-      {actionData?.message && (
+      {actionData && "error" in actionData && actionData.error && (
+        <div className="flex items-center gap-2 rounded-md bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800">
+          <IconAlertCircle className="h-4 w-4" />
+          <span>{actionData.error}</span>
+        </div>
+      )}
+
+      {actionData && "message" in actionData && actionData.message && (
         <div className="flex items-center gap-2 rounded-md bg-emerald-50 dark:bg-emerald-950/40 p-3 text-sm text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
           <IconCheck className="h-4 w-4" />
           <span>{actionData.message}</span>
@@ -458,53 +482,52 @@ export default function Page({
         </Card>
       )}
 
-      {/* CADEIA DE ATENDIMENTOS (CONTINUAÇÕES E GARANTIAS) */}
-      {appointment.children.length > 0 && (
+      {/* CADEIA DE ATENDIMENTOS (ORIGINAL → CONTINUAÇÕES E GARANTIAS) */}
+      {chain.length > 1 && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
               <IconLink className="h-5 w-5 text-primary" />
-              <CardTitle>Histórico de Retornos Vinculados</CardTitle>
+              <CardTitle>Linha do tempo dos atendimentos ligados</CardTitle>
             </div>
             <CardDescription>
-              Atendimentos realizados em sequência ou retornos de garantia
-              associados a este serviço.
+              Do atendimento original às continuações e retornos em garantia.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {appointment.children.map((child) => (
-                <div
-                  key={child.id}
-                  className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={
-                        child.linkType === "GARANTIA"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {formatLinkType(child.linkType)}
-                    </Badge>
-                    <NavLink
-                      to={`/appointments/${child.id}`}
-                      className="font-medium text-sm hover:underline"
-                    >
-                      #{child.id} - {child.title}
-                    </NavLink>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>{formatDate(child.serviceDate)}</span>
-                    <span className="font-semibold text-foreground">
-                      {formatCurrency(child.totalCost)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ol className="relative space-y-2 border-l pl-4">
+              {chain.map((entry) => {
+                const current = entry.id === appointment.id;
+                return (
+                  <li
+                    key={entry.id}
+                    style={{ marginLeft: `${Math.min(entry.depth, 4) * 12}px` }}
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 ${current ? "border-primary bg-primary/5" : "hover:bg-muted/30"}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      {entry.linkType ? (
+                        <Badge variant={entry.linkType === "GARANTIA" ? "destructive" : "secondary"} className="text-xs">
+                          {formatLinkType(entry.linkType)}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">Original</Badge>
+                      )}
+                      {current ? (
+                        <span className="font-medium text-sm">#{entry.id} - {entry.title} (este)</span>
+                      ) : (
+                        <NavLink to={`/appointments/${entry.id}`} className="font-medium text-sm hover:underline">
+                          #{entry.id} - {entry.title}
+                        </NavLink>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{formatDate(entry.serviceDate)}</span>
+                      <span className="font-semibold text-foreground">{formatCurrency(entry.totalCost)}</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
           </CardContent>
         </Card>
       )}

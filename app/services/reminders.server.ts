@@ -5,6 +5,7 @@
  */
 
 import prisma from "../../prisma/prisma";
+import type { Prisma } from "../generated/prisma/client";
 
 export interface ComputeDueParams {
   serviceDate: Date;
@@ -114,16 +115,20 @@ export function isReminderDue(
 
 /**
  * Sincroniza lembretes para um atendimento:
- * - Cria um MaintenanceReminder para cada item que possui intervalo
- * - Fecha como CONCLUIDO lembretes anteriores ainda abertos do mesmo serviço na mesma bike
+ * - Atendimento cancelado não gera lembrete (e remove os que já existiam)
+ * - Cria ou atualiza um MaintenanceReminder para cada item cujo serviço tem intervalo
+ * - Fecha como CONCLUIDO os lembretes em aberto do mesmo serviço na mesma bike,
+ *   desde que venham de atendimentos com data anterior ou igual
+ * - Se já existe um atendimento mais recente do mesmo serviço, o lembrete deste nasce CONCLUIDO
  */
 export async function syncRemindersForAppointment(
-  tx: any,
+  tx: Prisma.TransactionClient,
   appointment: {
     id: number;
     userId: number;
     bikeId: number;
     serviceDate: Date;
+    status?: string;
     odometerKm?: number | null;
     usageHours?: number | null;
   },
@@ -132,39 +137,69 @@ export async function syncRemindersForAppointment(
     serviceTemplateId?: number | null;
   }>
 ) {
+  if (appointment.status === "CANCELADO") {
+    await tx.maintenanceReminder.deleteMany({
+      where: { appointmentItemId: { in: items.map((item) => item.id) } },
+    });
+    return;
+  }
+
   for (const item of items) {
-    if (!item.serviceTemplateId) continue;
+    const template = item.serviceTemplateId
+      ? await tx.serviceTemplate.findFirst({
+          where: { id: item.serviceTemplateId, userId: appointment.userId },
+        })
+      : null;
 
-    const template = await tx.serviceTemplate.findUnique({
-      where: { id: item.serviceTemplateId, userId: appointment.userId },
-    });
+    const due = template
+      ? computeDue({
+          serviceDate: appointment.serviceDate,
+          odometerKm: appointment.odometerKm,
+          usageHours: appointment.usageHours,
+          intervalMonths: template.intervalMonths,
+          intervalKm: template.intervalKm,
+          intervalHours: template.intervalHours,
+        })
+      : null;
 
-    if (!template) continue;
+    if (!template || !due?.hasReminder) {
+      await tx.maintenanceReminder.deleteMany({ where: { appointmentItemId: item.id } });
+      continue;
+    }
+    const { dueDate, dueKm, dueHours } = due;
 
-    const { dueDate, dueKm, dueHours, hasReminder } = computeDue({
-      serviceDate: appointment.serviceDate,
-      odometerKm: appointment.odometerKm,
-      usageHours: appointment.usageHours,
-      intervalMonths: template.intervalMonths,
-      intervalKm: template.intervalKm,
-      intervalHours: template.intervalHours,
-    });
-
-    if (!hasReminder) continue;
-
-    // Fecha lembretes anteriores em aberto para o mesmo serviço na mesma bike
-    await tx.maintenanceReminder.updateMany({
+    const others = await tx.maintenanceReminder.findMany({
       where: {
         userId: appointment.userId,
         bikeId: appointment.bikeId,
         serviceTemplateId: template.id,
-        status: { in: ["ABERTO", "CONTATADO", "AGENDADO"] },
         NOT: { appointmentItemId: item.id },
+        appointmentItem: {
+          appointmentId: { not: appointment.id },
+          appointment: { status: { not: "CANCELADO" } },
+        },
       },
-      data: { status: "CONCLUIDO" },
+      select: {
+        id: true,
+        status: true,
+        appointmentItem: { select: { appointment: { select: { serviceDate: true } } } },
+      },
     });
+    const dateOf = (reminder: (typeof others)[number]) =>
+      reminder.appointmentItem.appointment.serviceDate.getTime();
+    const superseded = others.some((reminder) => dateOf(reminder) > appointment.serviceDate.getTime());
 
-    // Cria ou atualiza o lembrete vinculado a este item
+    const olderOpen = others
+      .filter((reminder) => ["ABERTO", "CONTATADO", "AGENDADO"].includes(reminder.status))
+      .filter((reminder) => dateOf(reminder) <= appointment.serviceDate.getTime())
+      .map((reminder) => reminder.id);
+    if (olderOpen.length) {
+      await tx.maintenanceReminder.updateMany({
+        where: { id: { in: olderOpen } },
+        data: { status: "CONCLUIDO" },
+      });
+    }
+
     await tx.maintenanceReminder.upsert({
       where: { appointmentItemId: item.id },
       create: {
@@ -175,12 +210,15 @@ export async function syncRemindersForAppointment(
         dueDate,
         dueKm,
         dueHours,
-        status: "ABERTO",
+        status: superseded ? "CONCLUIDO" : "ABERTO",
       },
       update: {
+        bikeId: appointment.bikeId,
+        serviceTemplateId: template.id,
         dueDate,
         dueKm,
         dueHours,
+        ...(superseded && { status: "CONCLUIDO" }),
       },
     });
   }
@@ -231,7 +269,7 @@ export async function updateReminderStatus(
   contactedAt?: Date | null
 ) {
   const result = await prisma.maintenanceReminder.updateMany({
-    where: { id, userId, status: { in: ["ABERTO", "CONTATADO"] } },
+    where: { id, userId, status: { in: ["ABERTO", "CONTATADO", "AGENDADO"] } },
     data: {
       status,
       ...(status === "CONTATADO" && { contactedAt: contactedAt ?? new Date() }),

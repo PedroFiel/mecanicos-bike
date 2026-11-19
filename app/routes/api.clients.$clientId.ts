@@ -1,11 +1,12 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
+import { isValidCPF } from "~/lib/br-documents"
 import { getOptionalUser } from "~/lib/auth.server"
 import { getClientById, updateClient, deleteClient } from "~/services/clients.server"
 
 const updateClientSchema = z.object({
   fullName: z.string().min(1).optional(),
-  cpf: z.string().optional().nullable(),
+  cpf: z.string().refine((cpf) => !cpf || isValidCPF(cpf), "CPF inválido").optional().nullable(),
   email: z.string().email().optional().nullable().or(z.literal("")),
   phone: z.string().optional().nullable(),
   birthDate: z.string().optional().nullable(),

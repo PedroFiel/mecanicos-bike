@@ -42,15 +42,53 @@ export const ReminderStatus = {
 
 export type ReminderStatusType = keyof typeof ReminderStatus;
 
+const money = (label: string) =>
+  z.coerce
+    .number({ error: `${label} deve ser um número` })
+    .finite(`${label} deve ser um número`)
+    .min(0, `${label} não pode ser negativo`)
+    .max(1_000_000, `${label} acima do limite permitido`);
+
+const optionalId = z.preprocess(
+  (value) => (value === "" || value === undefined ? null : value),
+  z.coerce.number().int().positive().nullable(),
+);
+
+/** Converte "AAAA-MM-DD" para o meio-dia de Brasília, evitando que a data volte um dia. */
+export function parseDateInput(value: string | Date): Date {
+  if (value instanceof Date) return value;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00-03:00`) : new Date(value);
+}
+
+/** Valor de hoje no formato aceito por <input type="date">, no fuso de Brasília. */
+export function todayInputValue(now = new Date()): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(now);
+}
+
+/** Data salva no banco no formato de <input type="date">, no fuso de Brasília. */
+export function toDateInputValue(date: Date | string): string {
+  return todayInputValue(new Date(date));
+}
+
+export const dateInputSchema = z
+  .string()
+  .min(1, "Data é obrigatória")
+  .refine((value) => !Number.isNaN(parseDateInput(value).getTime()), "Data inválida");
+
 // Schema para cada item individual do atendimento
 export const appointmentItemSchema = z.object({
-  id: z.coerce.number().optional(),
-  serviceTemplateId: z.coerce.number().optional().nullable(),
-  description: z.string().min(1, "Descrição do item é obrigatória"),
-  laborCost: z.coerce.number().min(0, "Mão de obra deve ser positiva").default(0),
-  partsDescription: z.string().optional().nullable(),
-  partsCost: z.coerce.number().min(0, "Valor das peças deve ser positivo").default(0),
+  id: optionalId.optional(),
+  serviceTemplateId: optionalId.optional(),
+  description: z.string().trim().min(1, "Descrição do item é obrigatória").max(200, "Descrição do item muito longa"),
+  laborCost: money("Mão de obra").default(0),
+  partsDescription: z.string().trim().max(200, "Descrição das peças muito longa").optional().nullable(),
+  partsCost: money("Valor das peças").default(0),
 });
+
+export const appointmentItemsSchema = z
+  .array(appointmentItemSchema)
+  .min(1, "O atendimento deve ter pelo menos um item")
+  .max(50, "Limite de 50 itens por atendimento");
 
 export type AppointmentItemFormData = z.infer<typeof appointmentItemSchema>;
 
@@ -58,34 +96,39 @@ export type AppointmentItemFormData = z.infer<typeof appointmentItemSchema>;
 export const appointmentFormSchema = z.object({
   title: z
     .string()
+    .trim()
     .min(3, "Título deve ter no mínimo 3 caracteres")
     .max(100, "Título deve ter no máximo 100 caracteres"),
   description: z
     .string()
     .max(500, "Descrição deve ter no máximo 500 caracteres")
     .optional()
-    .or(z.literal("")),
-  serviceDate: z.string().min(1, "Data do serviço é obrigatória"),
+    .nullable(),
+  serviceDate: dateInputSchema,
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).default("CONCLUIDO"),
-  bikeId: z.coerce.number().positive("Bike é obrigatória"),
-  clientId: z.coerce.number().positive("Cliente é obrigatório"),
+  bikeId: z.coerce.number().int().positive("Bike é obrigatória"),
+  clientId: z.coerce.number().int().positive("Cliente é obrigatório"),
 
   // Telemetria
-  odometerKm: z.coerce.number().min(0).optional().nullable(),
-  usageHours: z.coerce.number().min(0).optional().nullable(),
+  odometerKm: z.coerce.number().finite().min(0, "Odômetro não pode ser negativo").max(1_000_000).optional().nullable(),
+  usageHours: z.coerce.number().finite().min(0, "Horas de uso não podem ser negativas").max(100_000).optional().nullable(),
 
   // Pagamento
-  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).default("PENDENTE"),
-  amountPaid: z.coerce.number().min(0).default(0),
+  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).optional(),
+  amountPaid: money("Valor pago").default(0),
   paymentMethod: z.enum(["PIX", "DINHEIRO", "DEBITO", "CREDITO"]).optional().nullable(),
-  paidAt: z.string().optional().nullable(),
 
   // Encadeamento / Vínculo
-  parentAppointmentId: z.coerce.number().optional().nullable(),
+  parentAppointmentId: optionalId.optional(),
   linkType: z.enum(["CONTINUACAO", "GARANTIA"]).optional().nullable(),
 
-  // Itens em formato JSON string no FormData
-  itemsJson: z.string().min(2, "O atendimento deve ter pelo menos um item"),
+  items: appointmentItemsSchema,
+});
+
+/** "Marcar como pago": forma de pagamento e valor opcional (vazio = total). */
+export const markAsPaidSchema = z.object({
+  paymentMethod: z.enum(["PIX", "DINHEIRO", "DEBITO", "CREDITO"]).default("PIX"),
+  amount: z.preprocess((value) => (value === "" || value == null ? undefined : value), money("Valor pago").optional()),
 });
 
 export type AppointmentFormData = z.infer<typeof appointmentFormSchema>;

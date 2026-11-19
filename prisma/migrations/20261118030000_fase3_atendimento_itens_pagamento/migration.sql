@@ -1,18 +1,42 @@
 -- Migration: 20261118030000_fase3_atendimento_itens_pagamento
 -- Adiciona campos de pagamento, telemetria e vínculo a appointments;
 -- Cria tabelas appointment_items e maintenance_reminders;
--- Migra dados existentes de totalCost e service_details;
--- Remove service_details.
+-- Migra dados existentes de totalCost e service_details.
 
 -- 1. Novos campos em appointments
-ALTER TABLE "appointments" ADD COLUMN "odometerKm" REAL;
-ALTER TABLE "appointments" ADD COLUMN "usageHours" REAL;
-ALTER TABLE "appointments" ADD COLUMN "paymentStatus" TEXT NOT NULL DEFAULT 'PENDENTE';
-ALTER TABLE "appointments" ADD COLUMN "amountPaid" REAL NOT NULL DEFAULT 0;
-ALTER TABLE "appointments" ADD COLUMN "paymentMethod" TEXT;
-ALTER TABLE "appointments" ADD COLUMN "paidAt" DATETIME;
-ALTER TABLE "appointments" ADD COLUMN "parentAppointmentId" INTEGER;
-ALTER TABLE "appointments" ADD COLUMN "linkType" TEXT;
+-- O SQLite não adiciona FOREIGN KEY com ALTER TABLE; por isso a tabela é recriada
+-- (mesmo procedimento que o Prisma gera), preservando todos os dados.
+PRAGMA defer_foreign_keys=ON;
+PRAGMA foreign_keys=OFF;
+CREATE TABLE "new_appointments" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "clientId" INTEGER NOT NULL,
+    "bikeId" INTEGER NOT NULL,
+    "userId" INTEGER NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT,
+    "serviceDate" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "status" TEXT NOT NULL DEFAULT 'CONCLUIDO',
+    "totalCost" REAL,
+    "odometerKm" REAL,
+    "usageHours" REAL,
+    "paymentStatus" TEXT NOT NULL DEFAULT 'PENDENTE',
+    "amountPaid" REAL NOT NULL DEFAULT 0,
+    "paymentMethod" TEXT,
+    "paidAt" DATETIME,
+    "parentAppointmentId" INTEGER,
+    "linkType" TEXT,
+    CONSTRAINT "appointments_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "clients" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "appointments_bikeId_fkey" FOREIGN KEY ("bikeId") REFERENCES "bikes" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "appointments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "appointments_parentAppointmentId_fkey" FOREIGN KEY ("parentAppointmentId") REFERENCES "appointments" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+INSERT INTO "new_appointments" ("id", "clientId", "bikeId", "userId", "title", "description", "serviceDate", "status", "totalCost")
+SELECT "id", "clientId", "bikeId", "userId", "title", "description", "serviceDate", "status", "totalCost" FROM "appointments";
+DROP TABLE "appointments";
+ALTER TABLE "new_appointments" RENAME TO "appointments";
+PRAGMA foreign_keys=ON;
+PRAGMA defer_foreign_keys=OFF;
 
 -- 2. Criação da tabela appointment_items
 CREATE TABLE "appointment_items" (
@@ -32,7 +56,7 @@ CREATE TABLE "maintenance_reminders" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     "userId" INTEGER NOT NULL,
     "bikeId" INTEGER NOT NULL,
-    "appointmentItemId" INTEGER NOT NULL UNIQUE,
+    "appointmentItemId" INTEGER NOT NULL,
     "serviceTemplateId" INTEGER NOT NULL,
     "dueDate" DATETIME,
     "dueKm" REAL,
@@ -46,6 +70,7 @@ CREATE TABLE "maintenance_reminders" (
     CONSTRAINT "maintenance_reminders_serviceTemplateId_fkey" FOREIGN KEY ("serviceTemplateId") REFERENCES "service_templates" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
+CREATE UNIQUE INDEX "maintenance_reminders_appointmentItemId_key" ON "maintenance_reminders"("appointmentItemId");
 CREATE INDEX "maintenance_reminders_userId_status_dueDate_idx" ON "maintenance_reminders"("userId", "status", "dueDate");
 
 -- 4. Migração de dados existentes:
@@ -68,5 +93,6 @@ SET "paymentStatus" = 'PAGO',
     "paidAt" = "serviceDate"
 WHERE "status" = 'CONCLUIDO' AND "totalCost" > 0;
 
--- 5. Remoção da tabela legada service_details
-DROP TABLE IF EXISTS "service_details";
+-- 5. A tabela legada service_details só é removida na migration
+--    20261120000000_remove_service_details, depois do deploy do código novo
+--    (o código antigo ainda lê essa tabela).

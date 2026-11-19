@@ -38,3 +38,8 @@ export const serviceTemplateSchema = z.object({
 });
 
 export type ServiceTemplateFormData = z.infer<typeof serviceTemplateSchema>;
+
+export const shopSettingsSchema = z.object({
+  shopName: z.string().trim().max(80, "O nome da oficina deve ter no máximo 80 caracteres"),
+  whatsappTemplate: z.string().trim().max(500, "A mensagem do WhatsApp deve ter no máximo 500 caracteres"),
+});

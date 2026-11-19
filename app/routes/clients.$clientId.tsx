@@ -3,6 +3,7 @@ import type { Route } from "./+types/clients.$clientId"
 import { requireAuth } from "~/lib/auth.server"
 import { getClientById } from "~/services/clients.server"
 import type { RouteHandle } from "~/types/route"
+import { MarkAsPaidButton } from "~/features/appointments/components"
 import { Button } from "~/components/ui/button"
 import {
   Card,
@@ -361,7 +362,10 @@ export default function Page() {
                                 ? formatCurrency(appointment.totalCost)
                                 : "—"}
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right whitespace-nowrap space-x-1">
+                              {appointment.paymentStatus !== "PAGO" && appointment.status !== "CANCELADO" && (
+                                <MarkAsPaidButton appointmentId={appointment.id} />
+                              )}
                               <Button variant="ghost" size="sm" asChild>
                                 <NavLink to={`/appointments/${appointment.id}`}>
                                   Ver Detalhes

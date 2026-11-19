@@ -22,19 +22,17 @@ function CountChart({ title, rows, horizontal = false }: {
           <ResponsiveContainer width="100%" height={horizontal ? Math.max(160, rows.length * 34) : 220}>
             <BarChart data={rows} layout={horizontal ? "vertical" : "horizontal"} accessibilityLayer>
               <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
-              {horizontal ? (
-                <>
-                  <XAxis type="number" allowDecimals={false} tick={axis} />
+              {/* Recharts 2 só reconhece eixos como filhos diretos (não dentro de Fragment) */}
+              {horizontal
+                ? <XAxis type="number" allowDecimals={false} tick={axis} />
+                : <XAxis dataKey="name" tick={axis} />}
+              {horizontal
+                ? (
                   <YAxis type="category" dataKey="name" width={130} interval={0} tick={axis}
                     tickFormatter={(name: string) => name.length > 20 ? `${name.slice(0, 19)}…` : name}
                   />
-                </>
-              ) : (
-                <>
-                  <XAxis dataKey="name" tick={axis} />
-                  <YAxis width={35} allowDecimals={false} tick={axis} />
-                </>
-              )}
+                )
+                : <YAxis width={35} allowDecimals={false} tick={axis} />}
               <Tooltip contentStyle={tooltip} labelStyle={axis} cursor={{ fill: "var(--muted)", opacity: 0.4 }} />
               <Bar dataKey="count" name="Quantidade" fill="var(--chart-1)" maxBarSize={32} radius={3} />
             </BarChart>

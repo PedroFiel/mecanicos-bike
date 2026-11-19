@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken"
 import { createToken, getUserFromRequest, type JWTPayload } from "./jwt.server"
 import prisma from "prisma/prisma"
 import { env } from "~/lib/env.server"
+import { logSecurityEvent } from "~/lib/security-events.server"
 
 /**
  * Middleware que EXIGE autenticação.
@@ -90,6 +91,7 @@ export async function logout(
       where: { id: jwtPayload.userId },
       data: { tokenVersion: { increment: 1 } },
     })
+    await logSecurityEvent(request, "logout", jwtPayload.userId)
   }
 
   // Remove o cookie setando maxAge = 0

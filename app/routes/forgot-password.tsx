@@ -7,6 +7,7 @@ import { env } from "~/lib/env.server"
 import { isRateLimited } from "~/lib/rate-limit.server"
 import { sendEmail } from "~/lib/email.server"
 import { passwordResetEmail } from "~/lib/email-templates.server"
+import { logSecurityEvent } from "~/lib/security-events.server"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)
@@ -27,7 +28,7 @@ const SUCCESS_MESSAGE = "Se o e-mail existir em nossa base, você receberá um l
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData()
-  const data = { email: formData.get("email") as string }
+  const data = { email: String(formData.get("email") ?? "").trim().toLowerCase() }
 
   // Validate email
   const result = forgotPasswordSchema.safeParse(data)
@@ -42,7 +43,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const { email } = result.data
 
   // Rate limit: 3 requests per hour per email
-  const limited = await isRateLimited("forgot:" + email, 3, 60 * 60 * 1000)
+  const limited = isRateLimited("forgot:" + email, 3, 60 * 60 * 1000)
   if (limited) {
     // Still return success message to avoid timing attacks
     return { success: true, message: SUCCESS_MESSAGE }
@@ -94,13 +95,7 @@ export async function action({ request }: ActionFunctionArgs) {
       console.error("Falha ao enviar e-mail de redefinição de senha.")
     }
 
-    // Record security event
-    await prisma.securityEvent.create({
-      data: {
-        userId: user.id,
-        type: "password_reset_requested",
-      },
-    })
+    await logSecurityEvent(request, "password_reset_requested", user.id)
   }
 
   return { success: true, message: SUCCESS_MESSAGE }

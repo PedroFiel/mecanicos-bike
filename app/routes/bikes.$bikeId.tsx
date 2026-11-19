@@ -1,8 +1,9 @@
-import { NavLink, useLoaderData } from "react-router"
+import { NavLink, useFetcher, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId"
 import { requireAuth } from "~/lib/auth.server"
 import { getBikeById } from "~/services/bikes.server"
 import type { RouteHandle } from "~/types/route"
+import { MarkAsPaidButton } from "~/features/appointments/components"
 import { Button } from "~/components/ui/button"
 import {
   Card,
@@ -197,6 +198,7 @@ export default function Page() {
                       </p>
                     )}
                   </div>
+                  <ReminderActions id={rem.id} status={rem.status} />
                 </div>
               ))}
             </div>
@@ -276,7 +278,10 @@ export default function Page() {
                             ? formatCurrency(appointment.totalCost)
                             : "—"}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right whitespace-nowrap space-x-1">
+                          {appointment.paymentStatus !== "PAGO" && appointment.status !== "CANCELADO" && (
+                            <MarkAsPaidButton appointmentId={appointment.id} />
+                          )}
                           <Button variant="ghost" size="sm" asChild>
                             <NavLink to={`/appointments/${appointment.id}`}>
                               Ver Detalhes
@@ -296,3 +301,22 @@ export default function Page() {
   )
 }
 
+
+function ReminderActions({ id, status }: { id: number; status: string }) {
+  const fetcher = useFetcher<{ error: string | null }>()
+  const busy = fetcher.state !== "idle"
+  return (
+    <fetcher.Form method="post" action="/dashboard" className="flex flex-wrap gap-1.5 pt-1">
+      <input type="hidden" name="reminderId" value={id} />
+      {status !== "AGENDADO" && (
+        <Button size="sm" variant="outline" name="status" value="AGENDADO" disabled={busy}>
+          Agendado
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" name="status" value="DISPENSADO" disabled={busy}>
+        Dispensar
+      </Button>
+      {fetcher.data?.error && <p className="w-full text-xs text-red-500">{fetcher.data.error}</p>}
+    </fetcher.Form>
+  )
+}

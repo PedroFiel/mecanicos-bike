@@ -4,12 +4,12 @@ import { requireAuth } from "~/lib/auth.server";
 import {
   getAppointmentById,
   updateAppointment,
-  listPreviousAppointmentsForBike,
+  listLinkableAppointments,
 } from "~/services/appointments.server";
 import { listServiceTemplates } from "~/services/service-templates.server";
 import { AppointmentForm } from "~/features/appointments/components";
-import { appointmentFormSchema } from "~/features/appointments/types";
-import { z } from "zod";
+import { toDateInputValue } from "~/features/appointments/types";
+import { appointmentErrorMessage, parseAppointmentForm } from "~/features/appointments/form.server";
 import type { RouteHandle } from "~/types/route";
 
 export const handle: RouteHandle = {
@@ -26,7 +26,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const [serviceTemplates, previousAppointments] = await Promise.all([
     listServiceTemplates(userId, { includeInactive: true }),
-    listPreviousAppointmentsForBike(appointment.bikeId, userId, appointmentId),
+    listLinkableAppointments(appointment.clientId, userId),
   ]);
 
   return { appointment, serviceTemplates, previousAppointments };
@@ -34,72 +34,37 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export async function action({ request, params }: Route.ActionArgs) {
   const userId = await requireAuth(request);
-  const appointmentId = parseInt(params.appointmentId);
+  const appointmentId = Number(params.appointmentId);
   const formData = await request.formData();
 
-  const rawItemsJson = formData.get("itemsJson") as string;
-  let items = [];
-  try {
-    items = JSON.parse(rawItemsJson || "[]");
-  } catch {
-    return { errors: { itemsJson: "Lista de itens inválida" } };
-  }
-
-  const rawData = {
-    title: formData.get("title"),
-    description: formData.get("description"),
-    serviceDate: formData.get("serviceDate"),
-    status: formData.get("status"),
-    bikeId: formData.get("bikeId"),
-    clientId: formData.get("clientId"),
-    odometerKm: formData.get("odometerKm") || null,
-    usageHours: formData.get("usageHours") || null,
-    paymentStatus: formData.get("paymentStatus"),
-    amountPaid: formData.get("amountPaid") || 0,
-    paymentMethod: formData.get("paymentMethod") || null,
-    parentAppointmentId: formData.get("parentAppointmentId") || null,
-    linkType: formData.get("linkType") || null,
-    itemsJson: rawItemsJson,
-  };
-
-  let validatedData: z.infer<typeof appointmentFormSchema>;
-  try {
-    validatedData = appointmentFormSchema.parse(rawData);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const errors: Record<string, string> = {};
-      error.issues.forEach((issue) => {
-        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message;
-      });
-      return { errors };
-    }
-    throw error;
-  }
+  const parsed = parseAppointmentForm(formData, formData.get("clientId"));
+  if (parsed.errors) return { errors: parsed.errors };
+  const { data } = parsed;
 
   try {
     const updated = await updateAppointment(appointmentId, userId, {
-      title: validatedData.title,
-      description: validatedData.description || null,
-      serviceDate: validatedData.serviceDate,
-      status: validatedData.status as any,
-      bikeId: validatedData.bikeId,
-      odometerKm: validatedData.odometerKm,
-      usageHours: validatedData.usageHours,
-      paymentStatus: validatedData.paymentStatus as any,
-      amountPaid: validatedData.amountPaid,
-      paymentMethod: validatedData.paymentMethod as any,
-      parentAppointmentId: validatedData.parentAppointmentId,
-      linkType: validatedData.linkType as any,
-      items,
+      title: data.title,
+      description: data.description || null,
+      serviceDate: data.serviceDate,
+      status: data.status,
+      bikeId: data.bikeId,
+      odometerKm: data.odometerKm ?? null,
+      usageHours: data.usageHours ?? null,
+      paymentStatus: data.paymentStatus,
+      amountPaid: data.amountPaid,
+      paymentMethod: data.paymentMethod ?? null,
+      parentAppointmentId: data.parentAppointmentId ?? null,
+      linkType: data.linkType ?? null,
+      items: data.items,
     });
 
     if (!updated) {
-      return { errors: { general: "Atendimento não encontrado" } };
+      return { errors: { general: "Atendimento, bike, serviço ou atendimento de origem indisponível." } };
     }
 
     return redirect(`/appointments/${appointmentId}`);
-  } catch (err: any) {
-    return { errors: { general: err.message || "Erro ao atualizar atendimento" } };
+  } catch (error) {
+    return { errors: appointmentErrorMessage(error, "Não foi possível atualizar o atendimento. Tente novamente.") };
   }
 }
 
@@ -110,8 +75,7 @@ export default function Page({
   const { appointment, serviceTemplates, previousAppointments } = loaderData;
   const errors = actionData?.errors;
 
-  const serviceDate = new Date(appointment.serviceDate);
-  const formattedDate = serviceDate.toISOString().split("T")[0];
+  const formattedDate = toDateInputValue(appointment.serviceDate);
 
   const defaultValues = {
     title: appointment.title,

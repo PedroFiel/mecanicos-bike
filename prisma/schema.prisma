@@ -200,7 +200,7 @@ model MaintenanceReminder {
   createdAt         DateTime        @default(now())
 
   // Relações
-  user              User            @relation(fields: [userId], references: [id])
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   bike              Bike            @relation(fields: [bikeId], references: [id], onDelete: Cascade)
   appointmentItem   AppointmentItem @relation(fields: [appointmentItemId], references: [id], onDelete: Cascade)
   serviceTemplate   ServiceTemplate @relation(fields: [serviceTemplateId], references: [id])

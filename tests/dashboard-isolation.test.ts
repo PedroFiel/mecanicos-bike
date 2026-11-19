@@ -116,7 +116,9 @@ try {
     assert.equal((await bikes.action(requestArgs("/api/bikes", "POST", {}, {
       model: "Bike", clientId: other.client.id,
     }))).status, 404);
-    const appointmentInput = { title: "Revisão", clientId: own.client.id, bikeId: own.bike.id };
+    const appointmentInput = {
+      title: "Revisão", clientId: own.client.id, bikeId: own.bike.id, items: [{ description: "Revisão", laborCost: 10 }],
+    };
     for (const invalid of [
       { ...appointmentInput, bikeId: other.bike.id },
       { ...appointmentInput, clientId: other.client.id },

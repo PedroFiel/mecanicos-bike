@@ -19,6 +19,7 @@ import {
 import { sendEmail } from "~/lib/email.server"
 import { twoFactorCodeEmail } from "~/lib/email-templates.server"
 import { env } from "~/lib/env.server"
+import { logSecurityEvent } from "~/lib/security-events.server"
 
 // ─── Loader ─────────────────────────────────────────────────────────────────
 
@@ -118,19 +119,8 @@ export async function action({ request }: ActionFunctionArgs) {
     })
     if (!failed.count) return { error: "O desafio mudou. Tente novamente.", resent: false }
 
+    await logSecurityEvent(request, "2fa_failed", userId)
     if (newAttempts >= 5) {
-      // Registrar falha
-      await prisma.securityEvent.create({
-        data: {
-          userId,
-          type: "2fa_failed",
-          ip:
-            request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-            undefined,
-          userAgent: request.headers.get("user-agent") ?? undefined,
-        },
-      })
-
       return redirect("/login?error=2fa_failed", {
         headers: { "Set-Cookie": clearChallengeCookie() },
       })
@@ -192,16 +182,7 @@ export async function action({ request }: ActionFunctionArgs) {
   responseHeaders.append("Set-Cookie", clearChallengeCookie())
 
   // Registrar login bem-sucedido
-  await prisma.securityEvent.create({
-    data: {
-      userId,
-      type: "login_success",
-      ip:
-        request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-        undefined,
-      userAgent: request.headers.get("user-agent") ?? undefined,
-    },
-  })
+  await logSecurityEvent(request, "login_success", userId)
 
   // Criar sessão completa — obter o cookie JWT
   const sessionResponse = await createUserSession(

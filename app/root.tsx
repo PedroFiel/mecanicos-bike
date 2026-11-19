@@ -30,6 +30,7 @@ export function headers() {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data: blob:",
+      "worker-src 'self' blob:",
       env.NODE_ENV === "development" ? "connect-src 'self' ws: wss:" : "connect-src 'self'",
       "frame-ancestors 'none'",
     ].join("; "),

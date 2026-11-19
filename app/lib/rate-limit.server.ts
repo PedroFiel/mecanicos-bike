@@ -60,3 +60,19 @@ export function isRateLimited(
 export function resetRateLimit(key: string): void {
   store.delete(key);
 }
+
+/**
+ * IP do cliente para o limite de tentativas.
+ * Usa primeiro os headers definidos pela plataforma (Fly.io / Vercel), que o
+ * cliente não consegue forjar; o X-Forwarded-For fica como último recurso.
+ */
+export function getClientIp(request: Request): string {
+  const headers = request.headers;
+  return (
+    headers.get("fly-client-ip") ??
+    headers.get("x-vercel-forwarded-for")?.split(",")[0].trim() ??
+    headers.get("x-real-ip") ??
+    headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    "unknown"
+  );
+}

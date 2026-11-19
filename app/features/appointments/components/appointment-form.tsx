@@ -19,6 +19,8 @@ import { NavLink, useNavigation, Form } from "react-router";
 import {
   formatCurrency,
   formatDate,
+  toDateInputValue,
+  todayInputValue,
   type AppointmentItemFormData as AppointmentItemInput,
 } from "~/features/appointments/types";
 import { Spinner } from "~/components/ui/spinner";
@@ -51,6 +53,8 @@ interface PreviousAppointmentOption {
   id: number;
   title: string;
   serviceDate: Date | string;
+  bikeId?: number;
+  parentAppointmentId?: number | null;
   totalCost?: number | null;
 }
 
@@ -158,6 +162,50 @@ export function AppointmentForm({
   const [paymentStatus, setPaymentStatus] = React.useState<string>(
     defaultValues?.paymentStatus || "PENDENTE"
   );
+
+  // O status do pagamento acompanha o valor pago (o servidor aplica a mesma regra)
+  const statusFor = (paid: number, total: number) =>
+    paid >= total ? "PAGO" : paid > 0 ? "PARCIAL" : "PENDENTE";
+  const handleAmountPaidChange = (value: string) => {
+    setAmountPaid(value);
+    setPaymentStatus(statusFor(Number(value) || 0, calculatedTotal));
+  };
+  React.useEffect(() => {
+    if (paymentStatus === "PAGO") setAmountPaid(String(calculatedTotal));
+    else setPaymentStatus(statusFor(Number(amountPaid) || 0, calculatedTotal));
+    // Recalcula só quando o total muda
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calculatedTotal]);
+
+  // Data do serviço e vínculo com atendimento anterior
+  const [serviceDate, setServiceDate] = React.useState<string>(
+    defaultValues?.serviceDate || todayInputValue()
+  );
+  const [parentId, setParentId] = React.useState<string>(
+    defaultValues?.parentAppointmentId ? String(defaultValues.parentAppointmentId) : ""
+  );
+  const linkOptions = React.useMemo(() => {
+    // Em edição, não oferece o próprio atendimento nem os que derivam dele (evita ciclo)
+    const blocked = new Set<number>(appointmentId ? [appointmentId] : []);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const option of previousAppointments) {
+        if (option.parentAppointmentId && blocked.has(option.parentAppointmentId) && !blocked.has(option.id)) {
+          blocked.add(option.id);
+          grew = true;
+        }
+      }
+    }
+    return previousAppointments.filter((option) =>
+      !blocked.has(option.id)
+      && (option.bikeId === undefined || String(option.bikeId) === selectedBikeId)
+      && toDateInputValue(option.serviceDate) <= serviceDate
+    );
+  }, [previousAppointments, appointmentId, selectedBikeId, serviceDate]);
+  React.useEffect(() => {
+    if (parentId && !linkOptions.some((option) => String(option.id) === parentId)) setParentId("");
+  }, [linkOptions, parentId]);
 
   // Manipulação de itens
   const handleAddItem = (template?: ServiceTemplateOption) => {
@@ -308,10 +356,8 @@ export function AppointmentForm({
                     id="serviceDate"
                     name="serviceDate"
                     type="date"
-                    defaultValue={
-                      defaultValues?.serviceDate ||
-                      new Date().toISOString().split("T")[0]
-                    }
+                    value={serviceDate}
+                    onChange={(e) => setServiceDate(e.target.value)}
                     required
                   />
                   {errors?.serviceDate && (
@@ -606,6 +652,8 @@ export function AppointmentForm({
                       setPaymentStatus(val);
                       if (val === "PAGO") {
                         setAmountPaid(String(calculatedTotal));
+                      } else if (val === "PENDENTE") {
+                        setAmountPaid("");
                       }
                     }}
                   >
@@ -637,8 +685,17 @@ export function AppointmentForm({
                     min="0"
                     placeholder="0,00"
                     value={amountPaid}
-                    onChange={(e) => setAmountPaid(e.target.value)}
+                    onChange={(e) => handleAmountPaidChange(e.target.value)}
                   />
+                  {errors?.amountPaid ? (
+                    <FieldDescription className="text-red-500">
+                      {errors.amountPaid}
+                    </FieldDescription>
+                  ) : (
+                    <FieldDescription>
+                      O status é ajustado conforme o valor pago.
+                    </FieldDescription>
+                  )}
                 </Field>
 
                 <Field>
@@ -682,15 +739,25 @@ export function AppointmentForm({
                     id="parentAppointmentId"
                     name="parentAppointmentId"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    defaultValue={defaultValues?.parentAppointmentId ? String(defaultValues.parentAppointmentId) : ""}
+                    value={parentId}
+                    onChange={(e) => setParentId(e.target.value)}
                   >
                     <option value="">Nenhum (atendimento independente)</option>
-                    {previousAppointments.map((prev) => (
+                    {linkOptions.map((prev) => (
                       <option key={prev.id} value={prev.id}>
                         #{prev.id} - {prev.title} ({formatDate(prev.serviceDate)})
                       </option>
                     ))}
                   </select>
+                  {errors?.parentAppointmentId ? (
+                    <FieldDescription className="text-red-500">
+                      {errors.parentAppointmentId}
+                    </FieldDescription>
+                  ) : (
+                    <FieldDescription>
+                      Só aparecem atendimentos desta bike com data anterior ou igual.
+                    </FieldDescription>
+                  )}
                 </Field>
 
                 <Field>

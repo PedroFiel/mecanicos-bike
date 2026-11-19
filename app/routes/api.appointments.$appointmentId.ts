@@ -1,34 +1,28 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
+import { appointmentItemsSchema, dateInputSchema } from "~/features/appointments/types"
 import { getOptionalUser } from "~/lib/auth.server"
+import { AppointmentRuleError } from "~/services/appointments.server"
 import { getAppointmentById, updateAppointment, deleteAppointment } from "~/services/appointments.server"
 
-const appointmentItemInputSchema = z.object({
-  serviceTemplateId: z.number().int().positive().optional().nullable(),
-  description: z.string().min(1, "Descrição do item é obrigatória"),
-  laborCost: z.number().nonnegative().default(0),
-  partsDescription: z.string().optional().nullable(),
-  partsCost: z.number().nonnegative().default(0),
-})
-
 const updateAppointmentSchema = z.object({
-  title: z.string().min(1).optional(),
-  description: z.string().optional().nullable(),
-  serviceDate: z.string().refine((value) => !Number.isNaN(Date.parse(value))).optional(),
+  title: z.string().trim().min(1).max(100).optional(),
+  description: z.string().max(500).optional().nullable(),
+  serviceDate: dateInputSchema.optional(),
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
-  totalCost: z.number().nonnegative().optional().nullable(),
+  totalCost: z.number().nonnegative().max(1_000_000).optional().nullable(),
   bikeId: z.number().int().positive().optional(),
-  odometerKm: z.number().int().nonnegative().optional().nullable(),
-  usageHours: z.number().int().nonnegative().optional().nullable(),
+  odometerKm: z.number().nonnegative().max(1_000_000).optional().nullable(),
+  usageHours: z.number().nonnegative().max(100_000).optional().nullable(),
   paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).optional(),
   amountPaid: z.number().nonnegative().nullish().transform((amount) => amount ?? undefined),
   paymentMethod: z.enum(["PIX", "DINHEIRO", "CREDITO", "DEBITO", "CARTAO_CREDITO", "CARTAO_DEBITO"])
     .transform((method) => method === "CARTAO_CREDITO" ? "CREDITO" as const : method === "CARTAO_DEBITO" ? "DEBITO" as const : method).optional().nullable(),
-  paidAt: z.string().refine((value) => !Number.isNaN(Date.parse(value))).nullish(),
+  paidAt: dateInputSchema.nullish(),
   parentAppointmentId: z.number().int().positive().optional().nullable(),
   linkType: z.enum(["CONTINUACAO", "GARANTIA", "RETORNO_GARANTIA", "RETRABALHO"])
     .transform((type) => type === "CONTINUACAO" ? type : "GARANTIA" as const).optional().nullable(),
-  items: z.array(appointmentItemInputSchema).optional(),
+  items: appointmentItemsSchema.optional(),
 })
 
 // GET /api/appointments/:appointmentId — retorna um atendimento com todos os detalhes
@@ -77,12 +71,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const { totalCost, items, ...fields } = result.data
-    const updated = await updateAppointment(appointmentId, user.userId, {
-      ...fields,
-      items: items ?? (totalCost == null ? undefined : [{
-        description: "Serviço avulso", laborCost: totalCost, partsCost: 0,
-      }]),
-    })
+    let updated
+    try {
+      updated = await updateAppointment(appointmentId, user.userId, {
+        ...fields,
+        items: items ?? (totalCost == null ? undefined : [{
+          description: "Serviço avulso", laborCost: totalCost, partsCost: 0,
+        }]),
+      })
+    } catch (error) {
+      if (error instanceof AppointmentRuleError) {
+        return Response.json({ error: error.message, details: { fieldErrors: { [error.field]: [error.message] } } }, { status: 400 })
+      }
+      throw error
+    }
     if (!updated) return Response.json({ error: "Atendimento não encontrado" }, { status: 404 })
 
     return Response.json(updated)

@@ -15,7 +15,7 @@ import {
   restoreDefaultServices,
 } from "~/services/service-templates.server";
 import { getShopSettings, updateShopSettings } from "~/services/users.server";
-import { serviceTemplateSchema } from "~/features/service-templates/types";
+import { serviceTemplateSchema, shopSettingsSchema } from "~/features/service-templates/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useActionData, useLoaderData, useSearchParams } from "react-router";
 import {
@@ -49,13 +49,20 @@ export async function action({ request }: Route.ActionArgs) {
 
   // 1. Atualizar dados da oficina (nome e mensagem WhatsApp)
   if (intent === "update_shop_settings") {
-    const shopName = (formData.get("shopName") as string)?.trim() || null;
-    const whatsappTemplate =
-      (formData.get("whatsappTemplate") as string)?.trim() || null;
+    const parsed = shopSettingsSchema.safeParse({
+      shopName: formData.get("shopName") ?? "",
+      whatsappTemplate: formData.get("whatsappTemplate") ?? "",
+    });
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: parsed.error.issues.map((e) => e.message).join(", "),
+      };
+    }
 
     await updateShopSettings(userId, {
-      shopName,
-      whatsappTemplate,
+      shopName: parsed.data.shopName || null,
+      whatsappTemplate: parsed.data.whatsappTemplate || null,
     });
 
     return { success: true, message: "Configurações da oficina salvas!" };
@@ -88,6 +95,7 @@ export async function action({ request }: Route.ActionArgs) {
   // 3. Atualizar template de serviço existente
   if (intent === "update_service_template") {
     const id = Number(formData.get("id"));
+    if (!Number.isSafeInteger(id) || id <= 0) return { success: false, error: "Serviço inválido." };
     const rawData = {
       name: formData.get("name"),
       category: formData.get("category"),
@@ -114,6 +122,7 @@ export async function action({ request }: Route.ActionArgs) {
   // 4. Alternar status ativo/inativo
   if (intent === "toggle_active") {
     const id = Number(formData.get("id"));
+    if (!Number.isSafeInteger(id) || id <= 0) return { success: false, error: "Serviço inválido." };
     const active = formData.get("active") === "true";
 
     await setServiceTemplateActive(id, userId, active);

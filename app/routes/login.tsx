@@ -3,13 +3,13 @@ import crypto from "crypto"
 import { parse } from "cookie"
 import prisma from "prisma/prisma"
 import {
+  data,
   redirect,
   useActionData,
   useLoaderData,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "react-router"
-import { z } from "zod"
 import { LoginForm } from "~/components/login-form"
 import type { ActionData } from "~/types/actionData"
 import {
@@ -18,9 +18,19 @@ import {
   createChallengeCookie,
 } from "~/lib/auth.server"
 import { loginSchema, parseZodErrors } from "~/features/auth/types"
-import { isRateLimited } from "~/lib/rate-limit.server"
+import { getClientIp, isRateLimited } from "~/lib/rate-limit.server"
+import { logSecurityEvent } from "~/lib/security-events.server"
 import { sendEmail } from "~/lib/email.server"
 import { twoFactorCodeEmail } from "~/lib/email-templates.server"
+
+const LOGIN_ERROR_MESSAGES: Record<string, string> = {
+  expired: "O código expirou. Faça login novamente para receber outro.",
+  "2fa_failed": "Código incorreto muitas vezes. Faça login novamente para receber outro.",
+}
+
+// Hash usado quando o e-mail não existe, para o tempo de resposta não revelar contas
+const DUMMY_HASH = bcrypt.hashSync("senha-inexistente-0", 10)
+const INVALID_CREDENTIALS = { form: "E-mail ou senha inválidos", email: "E-mail ou senha inválidos" }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)
@@ -29,202 +39,116 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const url = new URL(request.url)
   const reset = url.searchParams.get("reset")
-  return { resetSuccess: reset === "success" }
+  const error = url.searchParams.get("error")
+  return {
+    resetSuccess: reset === "success",
+    errorMessage: error ? LOGIN_ERROR_MESSAGES[error] ?? null : null,
+  }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   // Rate-limit por IP — 20 tentativas em 15 minutos
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-
+  const ip = getClientIp(request)
   if (isRateLimited("login:" + ip, 20, 15 * 60 * 1000)) {
-    return {
-      errors: {
-        form: "Muitas tentativas. Tente novamente em alguns minutos.",
-      },
-    }
+    return data(
+      { errors: { form: "Muitas tentativas. Tente novamente em alguns minutos." } },
+      { status: 429 },
+    )
   }
 
   const formData = await request.formData()
-
-  const data = {
-    email: formData.get("email") as string,
-    password: formData.get("password") as string,
-  }
-
-  // Validação de schema
-  try {
-    loginSchema.parse(data)
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return { errors: parseZodErrors(error) }
-    }
-  }
-
-  // Busca o usuário pelo e-mail
-  const user = await prisma.user.findUnique({
-    where: { email: data.email },
+  const parsed = loginSchema.safeParse({
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
+    password: String(formData.get("password") ?? ""),
   })
+  if (!parsed.success) return { errors: parseZodErrors(parsed.error) }
+  const credentials = parsed.data
 
-  // --- Conta bloqueada? ---
-  if (user?.lockedUntil && user.lockedUntil > new Date()) {
-    return {
-      errors: {
-        form: "Conta temporariamente bloqueada. Tente novamente em alguns minutos.",
-      },
-    }
-  }
+  const user = await prisma.user.findUnique({ where: { email: credentials.email } })
 
-  // --- Credenciais inválidas (usuário não existe ou senha errada) ---
-  const isPasswordValid =
-    user !== null && (await bcrypt.compare(data.password, user.password))
+  // Sempre compara a senha (mesmo sem conta) para não revelar quais e-mails existem
+  const isPasswordValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
+  const isLocked = Boolean(user?.lockedUntil && user.lockedUntil > new Date())
 
-  if (!user || !isPasswordValid) {
-    // Incrementar tentativas falhas se o usuário existir
-    if (user) {
+  if (!user || !isPasswordValid || isLocked) {
+    await logSecurityEvent(request, "login_failed", user?.id)
+
+    // Durante o bloqueio não conta novas falhas; a mensagem continua genérica
+    if (user && !isLocked) {
       const newAttempts = user.failedLoginAttempts + 1
-
-      // Registrar SecurityEvent de falha
-      await prisma.securityEvent.create({
-        data: {
-          userId: user.id,
-          type: "login_failed",
-          ip,
-          userAgent: request.headers.get("user-agent") ?? undefined,
-        },
-      })
-
       if (newAttempts >= 5) {
-        // Bloquear conta por 15 minutos e resetar contador
-        const lockedUntil = new Date(Date.now() + 15 * 60 * 1000)
         await prisma.user.update({
           where: { id: user.id },
-          data: {
-            failedLoginAttempts: 0,
-            lockedUntil,
-          },
+          data: { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + 15 * 60 * 1000) },
         })
-        await prisma.securityEvent.create({
-          data: {
-            userId: user.id,
-            type: "login_blocked",
-            ip,
-            userAgent: request.headers.get("user-agent") ?? undefined,
-          },
-        })
+        await logSecurityEvent(request, "login_blocked", user.id)
       } else {
         await prisma.user.update({
           where: { id: user.id },
           data: { failedLoginAttempts: newAttempts },
         })
       }
-    } else {
-      // Registrar falha mesmo se o e-mail não existir
-      await prisma.securityEvent.create({
-        data: {
-          userId: null,
-          type: "login_failed",
-          ip,
-          userAgent: request.headers.get("user-agent") ?? undefined,
-        },
-      })
     }
 
-    // Erro genérico — nunca revelar qual campo errou
-    return {
-      errors: {
-        form: "E-mail ou senha inválidos",
-        email: "E-mail ou senha inválidos",
-      },
-    }
+    return { errors: INVALID_CREDENTIALS }
   }
 
   // --- Credenciais corretas ---
-
-  // Resetar tentativas falhas
   await prisma.user.update({
     where: { id: user.id },
     data: { failedLoginAttempts: 0, lockedUntil: null },
   })
 
-  // Se conta demo: criar sessão diretamente (sem 2FA)
+  // Conta demo: sessão direta (sem 2FA)
   if (user.isDemo) {
+    await logSecurityEvent(request, "login_success", user.id)
     return createUserSession(user.id, user.email, user.tokenVersion, "/dashboard")
   }
 
-  // Se dispositivo confiável registrado anteriormente: criar sessão direta (sem 2FA)
+  // Dispositivo confiável registrado anteriormente: sessão direta (sem 2FA)
   const cookieHeader = request.headers.get("Cookie")
-  if (cookieHeader) {
-    const cookies = parse(cookieHeader)
-    const deviceToken = cookies[`trusted_device_${user.id}`]
-    if (deviceToken) {
-      const deviceTokenHash = crypto
-        .createHash("sha256")
-        .update(deviceToken)
-        .digest("hex")
-
-      const trustedDevice = await prisma.authToken.findFirst({
-        where: {
-          userId: user.id,
-          type: "trusted_device",
-          tokenHash: deviceTokenHash,
-          usedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-      })
-
-      if (trustedDevice) {
-        return createUserSession(user.id, user.email, user.tokenVersion, "/")
-      }
+  const deviceToken = cookieHeader ? parse(cookieHeader)[`trusted_device_${user.id}`] : undefined
+  if (deviceToken) {
+    const trustedDevice = await prisma.authToken.findFirst({
+      where: {
+        userId: user.id,
+        type: "trusted_device",
+        tokenHash: crypto.createHash("sha256").update(deviceToken).digest("hex"),
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    })
+    if (trustedDevice) {
+      await logSecurityEvent(request, "login_success", user.id)
+      return createUserSession(user.id, user.email, user.tokenVersion, "/")
     }
   }
 
   // --- Fluxo 2FA ---
   const code = String(crypto.randomInt(100000, 1000000)) // 6 dígitos
-  const tokenHash = crypto.createHash("sha256").update(code).digest("hex")
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutos
-
-  // Salvar o AuthToken no banco
   const challenge = await prisma.authToken.create({
     data: {
       userId: user.id,
       type: "2fa_code",
-      tokenHash,
-      expiresAt,
+      tokenHash: crypto.createHash("sha256").update(code).digest("hex"),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutos
     },
   })
+  await logSecurityEvent(request, "2fa_sent", user.id)
 
-  // Registrar SecurityEvent de envio do 2FA
-  await prisma.securityEvent.create({
-    data: {
-      userId: user.id,
-      type: "2fa_sent",
-      ip,
-      userAgent: request.headers.get("user-agent") ?? undefined,
-    },
-  })
-
-  // Enviar o e-mail com o código
   try {
-    const html = twoFactorCodeEmail(code, "Mecânicos Bike")
     await sendEmail({
       to: user.email,
       subject: "Código de acesso — Mecânicos Bike",
-      html,
+      html: twoFactorCodeEmail(code, "Mecânicos Bike"),
     })
   } catch (err) {
     console.error("[2FA] Falha ao enviar e-mail:", err)
     // Continua mesmo se o envio falhar (o usuário pode reenviar)
   }
 
-  // Setar cookie de desafio e redirecionar para /login/verify
-  const challengeCookie = createChallengeCookie(user.id, challenge.id, user.tokenVersion)
   return redirect("/login/verify", {
-    headers: {
-      "Set-Cookie": challengeCookie,
-    },
+    headers: { "Set-Cookie": createChallengeCookie(user.id, challenge.id, user.tokenVersion) },
   })
 }
 
@@ -238,6 +162,11 @@ export default function Page() {
         {loaderData?.resetSuccess && (
           <div className="rounded-md bg-green-50 p-4 text-sm text-green-800">
             Senha redefinida com sucesso! Faça login com sua nova senha.
+          </div>
+        )}
+        {loaderData?.errorMessage && !actionData && (
+          <div className="rounded-md bg-amber-50 p-4 text-sm text-amber-800">
+            {loaderData.errorMessage}
           </div>
         )}
         {actionData?.errors?.form && (

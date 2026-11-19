@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { isValidCPF, onlyDigits } from "~/lib/br-documents"
 
 const cpfRegex = /^\d{3}\.\d{3}\.\d{3}-\d{2}$|^\d{11}$/
 
@@ -10,6 +11,7 @@ export const clientFormSchema = z.object({
   cpf: z
     .string()
     .regex(cpfRegex, "CPF inválido (use formato: 000.000.000-00 ou 00000000000)")
+    .refine(isValidCPF, "CPF inválido: confira os dígitos")
     .optional()
     .or(z.literal("")),
   email: z
@@ -19,8 +21,8 @@ export const clientFormSchema = z.object({
     .or(z.literal("")),
   phone: z
     .string()
-    .min(10, "Telefone deve ter no mínimo 10 dígitos")
-    .max(15, "Telefone deve ter no máximo 15 dígitos")
+    .refine((phone) => onlyDigits(phone).length >= 10, "Telefone deve ter no mínimo 10 dígitos")
+    .refine((phone) => onlyDigits(phone).length <= 13, "Telefone deve ter no máximo 13 dígitos")
     .optional()
     .or(z.literal("")),
   birthDate: z
