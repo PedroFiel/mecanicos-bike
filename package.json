@@ -10,6 +10,7 @@
     "test": "tsx tests/default-services.test.ts && tsx tests/reminders.test.ts && tsx tests/whatsapp.test.ts && tsx tests/email.test.ts && tsx tests/dashboard-isolation.test.ts && tsx tests/appointment-rules.test.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:turso": "tsx prisma/turso-migrate.ts",
+    "db:seed:account": "tsx prisma/seed-account.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
