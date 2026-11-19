@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { env } from "~/lib/env.server";
+import { emailConfigError, env } from "~/lib/env.server";
 
 export interface EmailParams {
   to: string;
@@ -7,7 +7,19 @@ export interface EmailParams {
   html: string;
 }
 
+/** Código e mensagem devolvidos pelo provedor, para o log do servidor (nunca exibidos ao usuário). */
+async function providerReason(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { code?: unknown; message?: unknown };
+    const reason = [body.code, body.message].filter((part) => typeof part === "string" && part).join(" — ");
+    return reason ? `: ${reason.slice(0, 300)}` : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function sendEmail({ to, subject, html }: EmailParams): Promise<void> {
+  if (emailConfigError) throw new Error(emailConfigError);
   if (env.EMAIL_PROVIDER === "brevo") {
     const apiKey = env.BREVO_API_KEY;
     const senderEmail = env.BREVO_SENDER_EMAIL;
@@ -29,7 +41,7 @@ export async function sendEmail({ to, subject, html }: EmailParams): Promise<voi
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (!response.ok) throw new Error(`Brevo recusou o envio (HTTP ${response.status}).`);
+    if (!response.ok) throw new Error(`Brevo recusou o envio (HTTP ${response.status})${await providerReason(response)}.`);
     return;
   }
 

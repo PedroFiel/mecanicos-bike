@@ -91,8 +91,8 @@ export async function action({ request }: ActionFunctionArgs) {
         subject: "Redefinição de senha — Mecânicos Bike",
         html: passwordResetEmail(resetUrl, user.name),
       })
-    } catch {
-      console.error("Falha ao enviar e-mail de redefinição de senha.")
+    } catch (error) {
+      console.error("Falha ao enviar e-mail de redefinição de senha:", error instanceof Error ? error.message : error)
     }
 
     await logSecurityEvent(request, "password_reset_requested", user.id)
