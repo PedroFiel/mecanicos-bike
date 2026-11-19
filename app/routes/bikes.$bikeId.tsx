@@ -1,8 +1,9 @@
-import { NavLink, useLoaderData } from "react-router"
+import { NavLink, useFetcher, useLoaderData } from "react-router"
 import type { Route } from "./+types/bikes.$bikeId"
 import { requireAuth } from "~/lib/auth.server"
 import { getBikeById } from "~/services/bikes.server"
 import type { RouteHandle } from "~/types/route"
+import { MarkAsPaidButton } from "~/features/appointments/components"
 import { Button } from "~/components/ui/button"
 import {
   Card,
@@ -20,13 +21,15 @@ import {
   TableRow,
 } from "~/components/ui/table"
 import { Badge } from "~/components/ui/badge"
-import { IconEdit, IconPlus, IconCalendar, IconUser } from "@tabler/icons-react"
+import { IconEdit, IconPlus, IconCalendar, IconUser, IconCalendarTime } from "@tabler/icons-react"
 import { getBikeDisplayName } from "~/features/bikes/types"
 import {
   formatStatus,
   formatDate,
   formatCurrency,
   getStatusColor,
+  getPaymentStatusBadge,
+  formatReminderStatus,
 } from "~/features/appointments/types"
 
 export const handle: RouteHandle = {
@@ -82,6 +85,13 @@ export default function Page() {
               <p className="text-base">{bike.model}</p>
             </div>
 
+            {bike.type && (
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Tipo</p>
+                <Badge variant="outline" className="mt-0.5">{bike.type}</Badge>
+              </div>
+            )}
+
             {bike.brand && (
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Marca</p>
@@ -93,6 +103,20 @@ export default function Page() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Cor</p>
                 <p className="text-base">{bike.color}</p>
+              </div>
+            )}
+
+            {bike.currentOdometerKm != null && (
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Odômetro Atual</p>
+                <p className="text-base font-semibold">{bike.currentOdometerKm.toLocaleString("pt-BR")} km</p>
+              </div>
+            )}
+
+            {bike.currentHours != null && (
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Horímetro Atual</p>
+                <p className="text-base font-semibold">{bike.currentHours.toLocaleString("pt-BR")} horas</p>
               </div>
             )}
 
@@ -120,6 +144,67 @@ export default function Page() {
           </div>
         </CardContent>
       </Card>
+
+      {/* SEÇÃO DE PRÓXIMAS REVISÕES */}
+      {bike.reminders && bike.reminders.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <IconCalendarTime className="h-5 w-5 text-primary" />
+              <CardTitle>Próximas Revisões Recomendadas</CardTitle>
+            </div>
+            <CardDescription>
+              Serviços programados com base em tempo decorrido, odômetro ou horas de uso.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {bike.reminders.map((rem: any) => (
+                <div
+                  key={rem.id}
+                  className="rounded-lg border bg-muted/20 p-3.5 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm">
+                      {rem.serviceTemplate?.name || "Revisão"}
+                    </span>
+                    <Badge variant="outline" className="text-xs">
+                      {formatReminderStatus(rem.status)}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    {rem.dueDate && (
+                      <p>
+                        Vencimento:{" "}
+                        <strong className="text-foreground">
+                          {formatDate(rem.dueDate)}
+                        </strong>
+                      </p>
+                    )}
+                    {rem.dueKm != null && (
+                      <p>
+                        Odômetro alvo:{" "}
+                        <strong className="text-foreground">
+                          {rem.dueKm.toLocaleString("pt-BR")} km
+                        </strong>
+                      </p>
+                    )}
+                    {rem.dueHours != null && (
+                      <p>
+                        Horímetro alvo:{" "}
+                        <strong className="text-foreground">
+                          {rem.dueHours.toLocaleString("pt-BR")} h
+                        </strong>
+                      </p>
+                    )}
+                  </div>
+                  <ReminderActions id={rem.id} status={rem.status} />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -162,38 +247,50 @@ export default function Page() {
                     <TableHead>Data</TableHead>
                     <TableHead>Título</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Pagamento</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {bike.appointments.map((appointment) => (
-                    <TableRow key={appointment.id}>
-                      <TableCell className="whitespace-nowrap">
-                        {formatDate(appointment.serviceDate)}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {appointment.title}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusColor(appointment.status)}>
-                          {formatStatus(appointment.status)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {appointment.totalCost
-                          ? formatCurrency(appointment.totalCost)
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" asChild>
-                          <NavLink to={`/appointments/${appointment.id}`}>
-                            Ver Detalhes
-                          </NavLink>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {bike.appointments.map((appointment) => {
+                    const payBadge = getPaymentStatusBadge(appointment.paymentStatus)
+                    return (
+                      <TableRow key={appointment.id}>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDate(appointment.serviceDate)}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {appointment.title}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusColor(appointment.status)}>
+                            {formatStatus(appointment.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={payBadge.className}>
+                            {payBadge.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {appointment.totalCost
+                            ? formatCurrency(appointment.totalCost)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap space-x-1">
+                          {appointment.paymentStatus !== "PAGO" && appointment.status !== "CANCELADO" && (
+                            <MarkAsPaidButton appointmentId={appointment.id} />
+                          )}
+                          <Button variant="ghost" size="sm" asChild>
+                            <NavLink to={`/appointments/${appointment.id}`}>
+                              Ver Detalhes
+                            </NavLink>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -204,3 +301,22 @@ export default function Page() {
   )
 }
 
+
+function ReminderActions({ id, status }: { id: number; status: string }) {
+  const fetcher = useFetcher<{ error: string | null }>()
+  const busy = fetcher.state !== "idle"
+  return (
+    <fetcher.Form method="post" action="/dashboard" className="flex flex-wrap gap-1.5 pt-1">
+      <input type="hidden" name="reminderId" value={id} />
+      {status !== "AGENDADO" && (
+        <Button size="sm" variant="outline" name="status" value="AGENDADO" disabled={busy}>
+          Agendado
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" name="status" value="DISPENSADO" disabled={busy}>
+        Dispensar
+      </Button>
+      {fetcher.data?.error && <p className="w-full text-xs text-red-500">{fetcher.data.error}</p>}
+    </fetcher.Form>
+  )
+}

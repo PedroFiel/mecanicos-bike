@@ -18,7 +18,19 @@ export async function getBikeById(id: number, userId: number) {
       client: { select: { id: true, fullName: true } },
       appointments: {
         orderBy: { serviceDate: "desc" },
-        select: { id: true, title: true, serviceDate: true, status: true, totalCost: true },
+        select: {
+          id: true,
+          title: true,
+          serviceDate: true,
+          status: true,
+          totalCost: true,
+          paymentStatus: true,
+        },
+      },
+      reminders: {
+        where: { status: { in: ["ABERTO", "CONTATADO", "AGENDADO"] } },
+        include: { serviceTemplate: true },
+        orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
       },
     },
   })
@@ -33,6 +45,9 @@ export async function createBike(
     color?: string | null
     frameNumber?: string | null
     characteristics?: string | null
+    type?: string | null
+    currentOdometerKm?: number | null
+    currentHours?: number | null
   }
 ) {
   const client = await prisma.client.findFirst({
@@ -49,6 +64,9 @@ export async function createBike(
       color: data.color || null,
       frameNumber: data.frameNumber || null,
       characteristics: data.characteristics || null,
+      type: data.type || null,
+      currentOdometerKm: data.currentOdometerKm ?? null,
+      currentHours: data.currentHours ?? null,
     },
   })
 }
@@ -62,6 +80,9 @@ export async function updateBike(
     color?: string | null
     frameNumber?: string | null
     characteristics?: string | null
+    type?: string | null
+    currentOdometerKm?: number | null
+    currentHours?: number | null
   }
 ) {
   const exists = await prisma.bike.findFirst({ where: { id, userId } })

@@ -1,19 +1,22 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { getBikeById, updateBike, deleteBike } from "~/services/bikes.server"
 
 const updateBikeSchema = z.object({
   model: z.string().min(1).optional(),
   brand: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
+  type: z.string().optional().nullable(),
+  currentOdometerKm: z.number().min(0).optional().nullable(),
+  currentHours: z.number().min(0).optional().nullable(),
   frameNumber: z.string().optional().nullable(),
   characteristics: z.string().optional().nullable(),
 })
 
 // GET /api/bikes/:bikeId — retorna dados completos de uma bike
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const bikeId = Number(params.bikeId)
@@ -28,7 +31,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 // PUT /api/bikes/:bikeId — atualiza dados de uma bike
 // DELETE /api/bikes/:bikeId — remove uma bike
 export async function action({ request, params }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const bikeId = Number(params.bikeId)

@@ -1,5 +1,8 @@
 import { z } from "zod"
 
+export const BIKE_TYPES = ["MTB", "Speed", "Urbana", "E-bike", "Outro"] as const
+export type BikeType = (typeof BIKE_TYPES)[number]
+
 export const bikeFormSchema = z.object({
   model: z
     .string()
@@ -15,6 +18,22 @@ export const bikeFormSchema = z.object({
     .max(30, "Cor deve ter no máximo 30 caracteres")
     .optional()
     .or(z.literal("")),
+  type: z
+    .string()
+    .max(30, "Tipo inválido")
+    .optional()
+    .or(z.literal(""))
+    .nullable(),
+  currentOdometerKm: z.coerce
+    .number()
+    .min(0, "A quilometragem deve ser positiva")
+    .optional()
+    .nullable(),
+  currentHours: z.coerce
+    .number()
+    .min(0, "As horas de uso devem ser positivas")
+    .optional()
+    .nullable(),
   frameNumber: z
     .string()
     .max(50, "Número do quadro deve ter no máximo 50 caracteres")

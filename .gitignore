@@ -11,3 +11,6 @@
 # Bancos locais
 *.sqlite
 *.db
+
+# Backups do banco de produção (contêm dados reais)
+backups/

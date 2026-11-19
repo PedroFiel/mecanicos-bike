@@ -10,6 +10,32 @@ import {
 import type { Route } from "./+types/root";
 import "./app.css";
 import { ThemeProvider } from "next-themes";
+import { env } from "~/lib/env.server";
+
+/**
+ * Headers de segurança aplicados em todas as respostas do servidor.
+ * - X-Frame-Options: impede clickjacking (a página não pode ser embutida em iframes)
+ * - X-Content-Type-Options: impede MIME-sniffing
+ * - Referrer-Policy: não vaza a URL de origem em requisições cross-origin
+ * - CSP: permite apenas recursos do próprio domínio + fontes do Google usadas no app
+ */
+export function headers() {
+  return {
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'", // unsafe-inline necessário para React hidratação
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: blob:",
+      "worker-src 'self' blob:",
+      env.NODE_ENV === "development" ? "connect-src 'self' ws: wss:" : "connect-src 'self'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+  };
+}
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -26,7 +52,7 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="pt-BR" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

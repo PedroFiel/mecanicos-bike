@@ -7,6 +7,8 @@ import prisma from "../../prisma/prisma"
 import type { ActionData } from "~/types/actionData"
 import { getOptionalUser } from "~/lib/auth.server"
 import { signupSchema, parseZodErrors } from "~/features/auth/types"
+import { seedDefaultServices } from "~/services/service-templates.server"
+import { DEFAULT_WHATSAPP_TEMPLATE } from "~/lib/default-services"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getOptionalUser(request)
@@ -21,7 +23,7 @@ export async function action({ request }: ActionFunctionArgs) {
   
   const data = {
     name: formData.get("name") as string,
-    email: formData.get("email") as string,
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
     phone: formData.get("phone") as string || undefined,
     password: formData.get("password") as string,
     confirmPassword: formData.get("confirmPassword") as string,
@@ -34,6 +36,8 @@ export async function action({ request }: ActionFunctionArgs) {
       return { errors: parseZodErrors(error) }
     }
   }
+
+  if (data.email === "demo@oficina.test") return { errors: { email: "E-mail reservado." } }
 
   const existingUser = await prisma.user.findUnique({
     where: { email: data.email }
@@ -50,14 +54,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const hashedPassword = await bcrypt.hash(data.password, 10)
 
   try {
-    await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name: data.name,
         email: data.email,
         phone: data.phone,
         password: hashedPassword,
-      }
+        shopName: data.name,
+        whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE,
+      },
     })
+
+    // Popula automaticamente os 18 serviços padrão para a nova oficina
+    await seedDefaultServices(newUser.id)
 
     return redirect("/login")
   } catch (error) {

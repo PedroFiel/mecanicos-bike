@@ -1,4 +1,5 @@
 import prisma from "../../prisma/prisma"
+import { normalizeCPF, normalizePhone } from "../lib/br-documents"
 
 export async function listClients(userId: number, search = "") {
   return prisma.client.findMany({
@@ -40,9 +41,9 @@ export async function createClient(
     data: {
       userId,
       fullName: data.fullName,
-      cpf: data.cpf || null,
+      cpf: normalizeCPF(data.cpf),
       email: data.email || null,
-      phone: data.phone || null,
+      phone: normalizePhone(data.phone),
       birthDate: data.birthDate ? new Date(data.birthDate) : null,
       address: data.address || null,
       notes: data.notes || null,
@@ -66,11 +67,13 @@ export async function updateClient(
   const exists = await prisma.client.findFirst({ where: { id, userId } })
   if (!exists) return null
 
-  const { birthDate, ...rest } = data
+  const { birthDate, cpf, phone, ...rest } = data
   return prisma.client.update({
     where: { id },
     data: {
       ...rest,
+      ...(cpf !== undefined && { cpf: normalizeCPF(cpf) }),
+      ...(phone !== undefined && { phone: normalizePhone(phone) }),
       ...(birthDate !== undefined && {
         birthDate: birthDate ? new Date(birthDate) : null,
       }),

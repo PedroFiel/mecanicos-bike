@@ -1,86 +1,88 @@
-import { redirect } from "react-router"
-import type { Route } from "./+types/appointments.new"
-import { requireAuth } from "~/lib/auth.server"
-import { getClientById } from "~/services/clients.server"
-import { createAppointment } from "~/services/appointments.server"
-import { AppointmentForm } from "~/features/appointments/components"
-import { appointmentFormSchema } from "~/features/appointments/types"
-import { z } from "zod"
-import type { RouteHandle } from "~/types/route"
+import { redirect } from "react-router";
+import type { Route } from "./+types/appointments.new";
+import { requireAuth } from "~/lib/auth.server";
+import { getClientById } from "~/services/clients.server";
+import {
+  createAppointment,
+  listLinkableAppointments,
+} from "~/services/appointments.server";
+import { listServiceTemplates } from "~/services/service-templates.server";
+import { AppointmentForm } from "~/features/appointments/components";
+import { appointmentErrorMessage, parseAppointmentForm } from "~/features/appointments/form.server";
+import type { RouteHandle } from "~/types/route";
 
 export const handle: RouteHandle = {
   title: "Novo Atendimento",
-}
+};
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const userId = await requireAuth(request)
-  const url = new URL(request.url)
-  const clientIdParam = url.searchParams.get("clientId")
+  const userId = await requireAuth(request);
+  const url = new URL(request.url);
+  const clientIdParam = url.searchParams.get("clientId");
 
-  if (!clientIdParam) throw redirect("/clients")
+  if (!clientIdParam) throw redirect("/clients");
 
-  const client = await getClientById(Number(clientIdParam), userId)
-  if (!client) throw new Response("Cliente não encontrado", { status: 404 })
+  const [client, serviceTemplates, previousAppointments] = await Promise.all([
+    getClientById(Number(clientIdParam), userId),
+    listServiceTemplates(userId, { includeInactive: false }),
+    listLinkableAppointments(Number(clientIdParam), userId),
+  ]);
+
+  if (!client) throw new Response("Cliente não encontrado", { status: 404 });
 
   if (client.bikes.length === 0) {
-    throw redirect(`/clients/${clientIdParam}?tab=bikes`)
+    throw redirect(`/clients/${clientIdParam}?tab=bikes`);
   }
 
-  return { client }
+  return {
+    client,
+    serviceTemplates,
+    previousAppointments,
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const userId = await requireAuth(request)
-  const formData = await request.formData()
-  const url = new URL(request.url)
-  const clientIdParam = url.searchParams.get("clientId")
+  const userId = await requireAuth(request);
+  const formData = await request.formData();
+  const clientIdParam = new URL(request.url).searchParams.get("clientId");
 
-  if (!clientIdParam) return { errors: { general: "Cliente não especificado" } }
+  if (!clientIdParam) return { errors: { general: "Cliente não especificado" } };
 
-  const data = {
-    title: formData.get("title"),
-    description: formData.get("description"),
-    serviceDate: formData.get("serviceDate"),
-    status: formData.get("status"),
-    totalCost: formData.get("totalCost"),
-    bikeId: formData.get("bikeId"),
-  }
+  const parsed = parseAppointmentForm(formData, clientIdParam);
+  if (parsed.errors) return { errors: parsed.errors };
+  const { data } = parsed;
 
-  let validatedData: z.infer<typeof appointmentFormSchema>
   try {
-    validatedData = appointmentFormSchema.parse(data)
+    const appointment = await createAppointment(userId, {
+      clientId: data.clientId,
+      bikeId: data.bikeId,
+      title: data.title,
+      description: data.description || null,
+      serviceDate: data.serviceDate,
+      status: data.status,
+      odometerKm: data.odometerKm,
+      usageHours: data.usageHours,
+      paymentStatus: data.paymentStatus,
+      amountPaid: data.amountPaid,
+      paymentMethod: data.paymentMethod,
+      parentAppointmentId: data.parentAppointmentId,
+      linkType: data.linkType,
+      items: data.items,
+    });
+
+    if (!appointment) return { errors: { general: "Cliente, bike, serviço ou atendimento de origem indisponível." } };
+    return redirect(`/clients/${clientIdParam}?tab=atendimentos`);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      const errors: Record<string, string> = {}
-      error.issues.forEach((issue) => {
-        if (issue.path[0]) errors[issue.path[0].toString()] = issue.message
-      })
-      return { errors }
-    }
-    throw error
+    return { errors: appointmentErrorMessage(error, "Não foi possível salvar o atendimento. Tente novamente.") };
   }
-
-  const appointment = await createAppointment(userId, {
-    clientId: parseInt(clientIdParam),
-    bikeId: parseInt(validatedData.bikeId),
-    title: validatedData.title,
-    description: validatedData.description || null,
-    serviceDate: validatedData.serviceDate ?? new Date().toISOString(),
-    status: validatedData.status ?? "CONCLUIDO",
-    totalCost: validatedData.totalCost ? parseFloat(validatedData.totalCost) : null,
-  })
-
-  if (!appointment) return { errors: { general: "Cliente ou bike não encontrado" } }
-
-  return redirect(`/clients/${clientIdParam}?tab=atendimentos`)
 }
 
 export default function Page({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { client } = loaderData
-  const errors = actionData?.errors
+  const { client, serviceTemplates, previousAppointments } = loaderData;
+  const errors = actionData?.errors;
 
   return (
     <div className="flex flex-col gap-4 p-4 lg:gap-6 lg:p-6">
@@ -99,9 +101,10 @@ export default function Page({
           clientId={client.id}
           clientName={client.fullName}
           bikes={client.bikes}
+          serviceTemplates={serviceTemplates}
+          previousAppointments={previousAppointments}
         />
       </div>
     </div>
-  )
+  );
 }
-

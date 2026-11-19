@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { getOptionalUser } from "~/lib/auth.server"
 import { listBikes, createBike } from "~/services/bikes.server"
 
 const createBikeSchema = z.object({
@@ -8,6 +8,9 @@ const createBikeSchema = z.object({
   model: z.string().min(1, "Modelo é obrigatório"),
   brand: z.string().optional(),
   color: z.string().optional(),
+  type: z.string().optional(),
+  currentOdometerKm: z.number().min(0).optional().nullable(),
+  currentHours: z.number().min(0).optional().nullable(),
   frameNumber: z.string().optional(),
   characteristics: z.string().optional(),
 })
@@ -15,7 +18,7 @@ const createBikeSchema = z.object({
 // GET /api/bikes — lista todas as bikes do usuário autenticado
 // Query params opcionais: ?clientId=1
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const url = new URL(request.url)
@@ -28,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // POST /api/bikes — cadastra uma nova bike para um cliente
 export async function action({ request }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   if (request.method !== "POST") {

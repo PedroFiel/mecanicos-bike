@@ -7,7 +7,9 @@
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
+    "test": "tsx tests/default-services.test.ts && tsx tests/reminders.test.ts && tsx tests/whatsapp.test.ts && tsx tests/email.test.ts && tsx tests/dashboard-isolation.test.ts && tsx tests/appointment-rules.test.ts",
     "db:seed": "tsx prisma/seed.ts",
+    "db:turso": "tsx prisma/turso-migrate.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -55,6 +57,7 @@
     "react-dom": "^19.1.1",
     "react-router": "^7.9.2",
     "recharts": "^2.15.4",
+    "resend": "^4.1.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2",

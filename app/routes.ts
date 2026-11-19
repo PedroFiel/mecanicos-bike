@@ -18,8 +18,11 @@ export default [
         route("appointments/:appointmentId/edit", "routes/appointments.$appointmentId.edit.tsx"),
     ]),
     route("login", "routes/login.tsx"),
+    route("login/verify", "routes/login.verify.tsx"),
     route("register", "routes/signup.tsx"),
     route("logout", "routes/logout.tsx"),
+    route("forgot-password", "routes/forgot-password.tsx"),
+    route("reset-password", "routes/reset-password.tsx"),
     // REST API — Clientes
     route("api/clients", "routes/api.clients.ts"),
     route("api/clients/:clientId", "routes/api.clients.$clientId.ts"),

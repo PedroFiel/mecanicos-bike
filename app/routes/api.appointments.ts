@@ -1,22 +1,38 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router"
 import { z } from "zod"
-import { getUserFromRequest } from "~/lib/jwt.server"
+import { appointmentItemsSchema, dateInputSchema } from "~/features/appointments/types"
+import { getOptionalUser } from "~/lib/auth.server"
+import { AppointmentRuleError } from "~/services/appointments.server"
 import { listAppointments, createAppointment } from "~/services/appointments.server"
 
 const createAppointmentSchema = z.object({
   clientId: z.number().int().positive("Cliente é obrigatório"),
   bikeId: z.number().int().positive("Bike é obrigatória"),
-  title: z.string().min(1, "Título é obrigatório"),
-  description: z.string().optional(),
-  serviceDate: z.string().optional(),
+  title: z.string().trim().min(1, "Título é obrigatório").max(100),
+  description: z.string().max(500).optional().nullable(),
+  serviceDate: dateInputSchema.optional(),
   status: z.enum(["PENDENTE", "CONCLUIDO", "CANCELADO"]).optional(),
-  totalCost: z.number().nonnegative().optional(),
+  odometerKm: z.number().nonnegative().max(1_000_000).optional().nullable(),
+  usageHours: z.number().nonnegative().max(100_000).optional().nullable(),
+  paymentStatus: z.enum(["PENDENTE", "PARCIAL", "PAGO"]).optional(),
+  amountPaid: z.number().nonnegative().nullish().transform((amount) => amount ?? undefined),
+  paymentMethod: z.enum(["PIX", "DINHEIRO", "CREDITO", "DEBITO", "CARTAO_CREDITO", "CARTAO_DEBITO"])
+    .transform((method) => method === "CARTAO_CREDITO" ? "CREDITO" as const : method === "CARTAO_DEBITO" ? "DEBITO" as const : method).optional().nullable(),
+  paidAt: dateInputSchema.nullish(),
+  parentAppointmentId: z.number().int().positive().optional().nullable(),
+  linkType: z.enum(["CONTINUACAO", "GARANTIA", "RETORNO_GARANTIA", "RETRABALHO"])
+    .transform((type) => type === "CONTINUACAO" ? type : "GARANTIA" as const).optional().nullable(),
+  items: appointmentItemsSchema.optional(),
+  totalCost: z.number().nonnegative().max(1_000_000).optional().nullable(),
+}).refine((data) => data.items !== undefined || data.totalCost != null, {
+  message: "Informe os itens do atendimento (ou totalCost para um item avulso)",
+  path: ["items"],
 })
 
 // GET /api/appointments — lista todos os atendimentos do usuário autenticado
 // Query params opcionais: ?clientId=1&status=PENDENTE
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   const url = new URL(request.url)
@@ -35,7 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 // POST /api/appointments — registra um novo atendimento
 export async function action({ request }: ActionFunctionArgs) {
-  const user = getUserFromRequest(request)
+  const user = await getOptionalUser(request)
   if (!user) return Response.json({ error: "Não autorizado" }, { status: 401 })
 
   if (request.method !== "POST") {
@@ -57,17 +73,33 @@ export async function action({ request }: ActionFunctionArgs) {
     )
   }
 
-  const { clientId, bikeId, title, description, serviceDate, status, totalCost } = result.data
-
-  const appointment = await createAppointment(user.userId, {
-    clientId,
-    bikeId,
-    title,
-    description: description || null,
-    serviceDate: serviceDate ?? new Date().toISOString(),
-    status: status ?? "CONCLUIDO",
-    totalCost: totalCost ?? null,
-  })
+  let appointment
+  try {
+    appointment = await createAppointment(user.userId, {
+      clientId: result.data.clientId,
+      bikeId: result.data.bikeId,
+      title: result.data.title,
+      description: result.data.description || null,
+      serviceDate: result.data.serviceDate ?? new Date(),
+      status: result.data.status ?? "CONCLUIDO",
+      odometerKm: result.data.odometerKm,
+      usageHours: result.data.usageHours,
+      paymentStatus: result.data.paymentStatus,
+      amountPaid: result.data.amountPaid,
+      paymentMethod: result.data.paymentMethod,
+      paidAt: result.data.paidAt ?? null,
+      parentAppointmentId: result.data.parentAppointmentId,
+      linkType: result.data.linkType,
+      items: result.data.items ?? [{
+        description: "Serviço avulso", laborCost: result.data.totalCost ?? 0, partsCost: 0,
+      }],
+    })
+  } catch (error) {
+    if (error instanceof AppointmentRuleError) {
+      return Response.json({ error: error.message, details: { fieldErrors: { [error.field]: [error.message] } } }, { status: 400 })
+    }
+    throw error
+  }
 
   if (!appointment) return Response.json({ error: "Cliente ou bike não encontrado" }, { status: 404 })
 

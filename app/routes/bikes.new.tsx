@@ -58,6 +58,9 @@ export async function action({ request }: Route.ActionArgs) {
     color: validated.color || null,
     frameNumber: validated.frameNumber || null,
     characteristics: validated.characteristics || null,
+    type: validated.type || null,
+    currentOdometerKm: validated.currentOdometerKm ?? null,
+    currentHours: validated.currentHours ?? null,
   })
 
   if (!bike) return { errors: { general: "Cliente não encontrado" } }
