@@ -43,7 +43,7 @@ if (-not (Test-Path -LiteralPath 'prisma/database.sqlite')) {
 npx.cmd prisma db push
 ```
 
-O app estará disponível em `http://localhost:5173`.
+
 
 ---
 
