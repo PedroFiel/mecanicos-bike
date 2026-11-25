@@ -35,9 +35,11 @@ try {
   });
 
   fetchMock.mock.mockImplementationOnce(async () =>
-    Response.json({ message: "private-provider-response" }, { status: 403 }),
+    Response.json({ code: "unauthorized", message: "unrecognised IP address" }, { status: 401 }),
   );
-  await assert.rejects(sendEmail(email), { message: "Brevo recusou o envio (HTTP 403)." });
+  await assert.rejects(sendEmail(email), {
+    message: "Brevo recusou o envio (HTTP 401): unauthorized — unrecognised IP address.",
+  });
   assert.equal(fetchMock.mock.callCount(), 2);
 
   env.EMAIL_PROVIDER = "resend";
