@@ -155,6 +155,18 @@ O status do pagamento é calculado pelo valor pago em relação ao total (Penden
 
 O faturamento usa o valor dos atendimentos concluídos pela data do serviço. Ticket médio, retorno, garantia e gráficos de volume seguem o período selecionado. O histórico de faturamento cobre 12 meses, e as filas de revisão, recebimento e atendimento mostram a situação atual da oficina.
 
+### Dados de demonstração numa conta existente
+
+Para apresentar com uma conta real (com 2FA por e-mail), o mesmo conjunto de dados da conta demo pode ser gravado numa conta já cadastrada no banco de produção:
+
+```bash
+npm run db:seed:account -- email@da.conta            # simula, sem gravar
+npm run db:seed:account -- email@da.conta --gravar   # grava no Turso (substitui só os dados de demonstração)
+npm run db:seed:account -- email@da.conta --remover  # remove só os dados de demonstração
+```
+
+Os clientes gerados levam a marca "[demonstração]" nas observações; o que a pessoa cadastrou não é alterado. As datas são calculadas a partir do dia em que o comando roda, então rodar de novo perto da apresentação mantém a lista "Clientes para chamar" atual. Os telefones são fictícios: o botão do WhatsApp abre uma conversa com a mensagem pronta, mas não envie.
+
 ---
 
 ## Deploy
